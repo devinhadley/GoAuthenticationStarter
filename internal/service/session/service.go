@@ -13,12 +13,12 @@ import (
 
 type SessionQueries interface {
 	CreateSession(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
-	DeleteLeastRecentlyUsedSessionByUser(ctx context.Context, userID int64) error
-	DeleteSessionByID(ctx context.Context, id []byte) error
-	GetSessionByID(ctx context.Context, id []byte) (db.Session, error)
+	DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error
+	GetSession(ctx context.Context, id []byte) (db.Session, error)
 	GetSessionCountByUser(ctx context.Context, userID int64) (int64, error)
-	UpdateSessionIDByID(ctx context.Context, arg db.UpdateSessionIDByIDParams) (db.Session, error)
+	UpdateSessionID(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error)
 	UpdateSessionLastSeenToNow(ctx context.Context, id []byte) (db.Session, error)
+	DeactivateSession(ctx context.Context, id []byte) error
 }
 
 type Service struct {
@@ -47,7 +47,7 @@ func (s *Service) CreateSession(ctx context.Context, user db.User) (Session, err
 	// TODO: Test this behavior especially in integration.
 	// Limit number of active user sessions.
 	if numSessions >= MaxNumberOfActiveSessions {
-		err = s.queries.DeleteLeastRecentlyUsedSessionByUser(ctx, user.ID)
+		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, user.ID)
 		if err != nil {
 			return Session{}, err
 		}
@@ -75,7 +75,7 @@ func (s *Service) CreateSession(ctx context.Context, user db.User) (Session, err
 }
 
 func (s *Service) GetSession(ctx context.Context, sessionID []byte) (Session, error) {
-	session, err := s.queries.GetSessionByID(ctx, sessionID)
+	session, err := s.queries.GetSession(ctx, sessionID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -84,7 +84,7 @@ func (s *Service) GetSession(ctx context.Context, sessionID []byte) (Session, er
 }
 
 func (s *Service) ExpireSession(ctx context.Context, sessionID []byte) error {
-	return s.queries.DeleteSessionByID(ctx, sessionID)
+	return s.queries.DeactivateSession(ctx, sessionID)
 }
 
 func (s *Service) UpdateLastSeen(ctx context.Context, session Session) error {
@@ -106,7 +106,7 @@ func (s *Service) RotateSession(ctx context.Context, sessionID []byte) (Session,
 		return Session{}, err
 	}
 
-	updatedSession, err := s.queries.UpdateSessionIDByID(ctx, db.UpdateSessionIDByIDParams{
+	updatedSession, err := s.queries.UpdateSessionID(ctx, db.UpdateSessionIDParams{
 		ID:   sessionID,
 		ID_2: rotatedSessionID,
 	})

@@ -6,41 +6,42 @@ INSERT INTO sessions (
     $1,
     $2
 )
-RETURNING id, user_id, created_at, last_seen_at, last_refreshed_at;
+RETURNING *;
 
--- name: GetSessionByID :one
+-- name: GetSession :one
 SELECT *
 FROM sessions
-WHERE id = $1;
+WHERE id = $1 AND is_active = TRUE;
 
--- name: DeleteSessionByID :exec
-DELETE FROM sessions
-WHERE id = $1;
+-- name: DeactivateSession :exec
+UPDATE sessions
+SET is_active = FALSE
+WHERE id = $1 and is_active = TRUE;
 
 -- name: GetSessionCountByUser :one
 SELECT COUNT(*)
 FROM sessions
-WHERE user_id = $1;
+WHERE user_id = $1 and is_active = TRUE;
 
--- name: UpdateSessionIDByID :one
+-- name: UpdateSessionID :one
 UPDATE sessions
 SET id = $2
-WHERE id = $1
+WHERE id = $1 and is_active = TRUE
 RETURNING *;
 
 -- name: UpdateSessionLastSeenToNow :one
 UPDATE sessions
 SET last_seen_at = NOW()
-WHERE id = $1
+WHERE id = $1 and is_active = TRUE
 RETURNING *;
 
--- name: DeleteLeastRecentlyUsedSessionByUser :exec
-DELETE
-FROM sessions
+-- name: DeactivateLeastRecentlyUsedSessionForUser :exec
+UPDATE sessions
+SET is_active = FALSE
 WHERE id = (
   SELECT s.id
   FROM sessions s
-  WHERE s.user_id = $1
+  WHERE s.user_id = $1 and is_active = TRUE
   ORDER BY s.last_seen_at ASC
   LIMIT 1
 );

@@ -87,6 +87,7 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 			return
 		}
 
+		// TODO: Update last refreshed at also.
 		if session.ShouldRotate() {
 			session, err = sessionService.RotateSession(r.Context(), session.DBSession().ID)
 			if err != nil {

@@ -6,7 +6,7 @@ INSERT INTO users (
     $1,
     $2
 )
-RETURNING id, email, password_hash, signed_up_at, is_active;
+RETURNING *;
 
 -- name: GetUserByEmail :one
 SELECT id, email, password_hash, signed_up_at, is_active

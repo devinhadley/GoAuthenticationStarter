@@ -15,10 +15,8 @@ import (
 	"github.com/matthewhartstonge/argon2"
 )
 
-// TODO: Add weak password validation!
-
 var (
-	ErrInvalidSignUpInput = errors.New("invalid sign-up input")
+	ErrEmailBlank         = errors.New("invalid sign-up input")
 	ErrInvalidLogInInput  = errors.New("invalid log-in input")
 	ErrEmailTaken         = errors.New("email already in use")
 	ErrInvalidEmail       = errors.New("email is not valid")
@@ -53,7 +51,7 @@ func NewService(queries UserQueries) *Service {
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (db.User, error) {
 	email, ok := trimAndRequireValue(input.Email)
 	if !ok {
-		return db.User{}, ErrInvalidSignUpInput
+		return db.User{}, ErrEmailBlank
 	}
 
 	err := s.isValidPassword(input.Password)
@@ -92,15 +90,12 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (db.User, 
 }
 
 func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, error) {
-	// TODO: If user not found, still verify a dummy hash to avoid timing attacks...
-	// Not necessary if sign up reveals authenticated user?
 	email, ok := trimAndRequireValue(input.Email)
 	if !ok {
 		return db.User{}, ErrInvalidLogInInput
 	}
 
-	ok = !isEmpty(input.Password)
-	if !ok {
+	if input.Password == "" {
 		return db.User{}, ErrInvalidLogInInput
 	}
 
@@ -139,11 +134,6 @@ func trimAndRequireValue(value string) (string, bool) {
 	}
 
 	return trimmed, true
-}
-
-func isEmpty(value string) bool {
-	trimmed := strings.TrimSpace(value)
-	return trimmed == ""
 }
 
 func (s *Service) isValidPassword(password string) error {

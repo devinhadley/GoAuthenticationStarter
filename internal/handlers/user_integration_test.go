@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/service/session"
@@ -19,7 +20,6 @@ import (
 	"github.com/matthewhartstonge/argon2"
 )
 
-// TODO: Add weak password validation!
 type userIntegrationDeps struct {
 	pool        *pgxpool.Pool
 	queries     *db.Queries
@@ -36,11 +36,11 @@ func TestSignUpIntegration(t *testing.T) {
 	t.Run("sign up succeeds and persists user", testSignUpSucceedsAndPersistsUser)
 	t.Run("duplicate email returns bad request and does not create second user", testSignUpDuplicateEmail)
 	t.Run("invalid email returns bad request and does not persist user", testSignUpRejectsInvalidEmail)
-	t.Run("blank email or password returns bad request and does not persist user", testSignUpRejectsBlankEmailOrPassword)
+	t.Run("blank email returns bad request and does not persist user", testSignUpRejectsBlankEmail)
+	t.Run("blank password returns bad request and does not persist user", testSignUpRejectsBlankPassword)
 	t.Run("short password returns bad request and does not persist user", testSignUpRejectsShortPassword)
 	t.Run("long password returns bad request and does not persist user", testSignUpRejectsLongPassword)
 	t.Run("common password returns bad request and does not persist user", testSignUpRejectsCommonPassword)
-	t.Run("sign up deletes oldest session if more than 10", func(t *testing.T) { t.Skip("needs implemented!") })
 }
 
 func TestLogInIntegration(t *testing.T) {
@@ -48,10 +48,11 @@ func TestLogInIntegration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
-	t.Run("login succeeds with valid credentials and creates session", testLogInSucceeds)
+	t.Run("login succeeds with valid credentials and creates session", testSuccessfulLogin)
 	t.Run("login rejects invalid email", testLogInRejectsInvalidEmail)
 	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
 	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
+	t.Run("log in deletes oldest session if more than 10", func(t *testing.T) { t.Skip("needs implemented!") })
 }
 
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
@@ -88,6 +89,17 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 	if !ok {
 		t.Fatal("stored password hash does not match input password")
 	}
+
+	count, err := deps.queries.GetSessionCountByUser(context.Background(), storedUser.ID)
+	if err != nil {
+		t.Fatalf("got error %v when getting session count", err)
+	}
+
+	if count != 1 {
+		t.Fatalf("got number of sessions for user %v wanted %v", count, 1)
+	}
+
+	assertSessionCookieExists(t, rec)
 }
 
 func testSignUpDuplicateEmail(t *testing.T) {
@@ -119,46 +131,48 @@ func testSignUpDuplicateEmail(t *testing.T) {
 	}
 }
 
-func testSignUpRejectsBlankEmailOrPassword(t *testing.T) {
-	testCases := []struct {
-		name        string
-		email       string
-		password    string
-		assertEmail string
-	}{
-		{name: "blank email", email: "", password: "example-password", assertEmail: ""},
-		{name: "blank password", email: "blank-password@example.com", password: "", assertEmail: "blank-password@example.com"},
+func testSignUpRejectsBlankEmail(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+
+	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+		"email":    "",
+		"password": "example-password",
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			deps := setupUserIntegrationDeps(t)
-
-			rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
-				"email":    tc.email,
-				"password": tc.password,
-			})
-
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-			}
-
-			gotErr := decodeErrorResponse(t, rec)
-			if gotErr.Error != "email and password may not be blank" {
-				t.Fatalf("got error %q, want %q", gotErr.Error, "email and password may not be blank")
-			}
-
-			if tc.assertEmail == "" {
-				userCount := countUsers(t, deps.pool)
-				if userCount != 0 {
-					t.Fatalf("got %d users in database, want 0", userCount)
-				}
-				return
-			}
-
-			assertNoUserWithEmail(t, deps.queries, tc.assertEmail)
-		})
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Email != "email may not be blank" {
+		t.Fatalf("got email error %q, want %q", gotErr.Email, "email may not be blank")
 	}
+
+	userCount := countUsers(t, deps.pool)
+	if userCount != 0 {
+		t.Fatalf("got %d users in database, want 0", userCount)
+	}
+}
+
+func testSignUpRejectsBlankPassword(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+
+	email := "blank-password@example.com"
+	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+		"email":    email,
+		"password": "",
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Password != "password can't be empty" {
+		t.Fatalf("got password error %q, want %q", gotErr.Password, "password can't be empty")
+	}
+
+	assertNoUserWithEmail(t, deps.queries, email)
 }
 
 func testSignUpRejectsCommonPassword(t *testing.T) {
@@ -166,7 +180,7 @@ func testSignUpRejectsCommonPassword(t *testing.T) {
 
 	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    "test@example.com",
-		"password": "123456",
+		"password": "123456789101112",
 	})
 
 	if rec.Code != http.StatusBadRequest {
@@ -197,7 +211,7 @@ func testSignUpRejectsShortPassword(t *testing.T) {
 	}
 
 	gotErr := decodeErrorResponse(t, rec)
-	if gotErr.Password != "password must be 12 or more characters" {
+	if gotErr.Password != "password must be 13 or more characters" {
 		t.Fatalf("got password error %q, want %q", gotErr.Password, "password must be 12 or more characters")
 	}
 
@@ -254,7 +268,7 @@ func testSignUpRejectsInvalidEmail(t *testing.T) {
 	}
 }
 
-func testLogInSucceeds(t *testing.T) {
+func testSuccessfulLogin(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
 	user, err := deps.userService.SignUp(context.Background(), user.AuthenticateBody{
@@ -283,6 +297,8 @@ func testLogInSucceeds(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("got number of sessions for user %v wanted %v", count, 1)
 	}
+
+	assertSessionCookieExists(t, rec)
 }
 
 func testLogInRejectsInvalidEmail(t *testing.T) {
@@ -405,6 +421,25 @@ func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) apiErrorR
 	}
 
 	return got
+}
+
+func assertSessionCookieExists(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			if cookie.Value == "" {
+				t.Fatal("session cookie id has empty value")
+			}
+
+			if cookie.Expires.Before(time.Now()) {
+				t.Fatalf("Expected session cookie to expire after now, but got %v", cookie.Expires)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected response to include session cookie id")
 }
 
 func assertNoUserWithEmail(t *testing.T, queries *db.Queries, email string) {

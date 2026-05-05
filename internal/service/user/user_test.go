@@ -81,8 +81,8 @@ func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 		password      string
 		expectedError error
 	}{
-		{name: "empty email", email: "", password: "example-password", expectedError: ErrInvalidSignUpInput},
-		{name: "whitespace email", email: "   ", password: "example-password", expectedError: ErrInvalidSignUpInput},
+		{name: "empty email", email: "", password: "example-password", expectedError: ErrEmailBlank},
+		{name: "whitespace email", email: "   ", password: "example-password", expectedError: ErrEmailBlank},
 		{name: "empty password", email: "test@example.com", password: "", expectedError: ErrPasswordEmpty},
 		{name: "whitespace password", email: "test@example.com", password: "   ", expectedError: ErrPasswordEmpty},
 	}
@@ -320,7 +320,6 @@ func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
 		{name: "empty email", email: "", password: "example-password"},
 		{name: "whitespace email", email: "   ", password: "example-password"},
 		{name: "empty password", email: "test@example.com", password: ""},
-		{name: "whitespace password", email: "test@example.com", password: "   "},
 	}
 
 	for _, tc := range testCases {

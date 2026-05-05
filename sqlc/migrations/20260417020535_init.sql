@@ -16,13 +16,19 @@ CREATE TABLE sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     CHECK (created_at <= last_seen_at),
     CHECK (created_at <= last_refreshed_at)
 );
 
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_sessions_created_at ON sessions(created_at);
-CREATE INDEX idx_sessions_last_seen_at ON sessions(last_seen_at);
+
+CREATE INDEX idx_sessions_user_active
+ON sessions(user_id)
+WHERE is_active = TRUE;
+
+CREATE INDEX idx_sessions_user_active_last_seen
+ON sessions(user_id, last_seen_at, id)
+WHERE is_active = TRUE;
 
 -- +goose Down
 DROP TABLE IF EXISTS sessions;
