@@ -1,4 +1,5 @@
-package handlers
+// Integration contains all integration tests and helpers. It is one package to streamline shared test dependencies like DB.
+package integration
 
 import (
 	"context"
@@ -11,9 +12,9 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/handlers"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
-	"devinhadley/gobootstrapweb/internal/utils/testutil"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,7 +64,7 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 		"password": "example-password",
 	}
 
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", input)
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -110,12 +111,12 @@ func testSignUpDuplicateEmail(t *testing.T) {
 		"password": "example-password",
 	}
 
-	first := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", input)
+	first := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
 	if first.Code != http.StatusOK {
 		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusOK)
 	}
 
-	second := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", input)
+	second := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
 	if second.Code != http.StatusBadRequest {
 		t.Fatalf("second sign up got status %d, want %d", second.Code, http.StatusBadRequest)
 	}
@@ -134,7 +135,7 @@ func testSignUpDuplicateEmail(t *testing.T) {
 func testSignUpRejectsBlankEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    "",
 		"password": "example-password",
 	})
@@ -158,7 +159,7 @@ func testSignUpRejectsBlankPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
 	email := "blank-password@example.com"
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    email,
 		"password": "",
 	})
@@ -178,7 +179,7 @@ func testSignUpRejectsBlankPassword(t *testing.T) {
 func testSignUpRejectsCommonPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    "test@example.com",
 		"password": "123456789101112",
 	})
@@ -201,7 +202,7 @@ func testSignUpRejectsCommonPassword(t *testing.T) {
 func testSignUpRejectsShortPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    "short-password@example.com",
 		"password": "12345678901",
 	})
@@ -224,7 +225,7 @@ func testSignUpRejectsShortPassword(t *testing.T) {
 func testSignUpRejectsLongPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    "long-password@example.com",
 		"password": strings.Repeat("a", 257),
 	})
@@ -248,7 +249,7 @@ func testSignUpRejectsInvalidEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
 	email := "invalid"
-	rec := testutil.PerformJSONRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
 		"email":    email,
 		"password": "example-password",
 	})
@@ -279,7 +280,7 @@ func testSuccessfulLogin(t *testing.T) {
 		t.Fatalf("failed to seed user: %v", err)
 	}
 
-	rec := testutil.PerformJSONRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
 		"email":    "test@example.com",
 		"password": "example-password",
 	})
@@ -304,7 +305,7 @@ func testSuccessfulLogin(t *testing.T) {
 func testLogInRejectsInvalidEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := testutil.PerformJSONRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
 		"email":    "invalid",
 		"password": "example-password",
 	})
@@ -322,7 +323,7 @@ func testLogInRejectsInvalidEmail(t *testing.T) {
 func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := testutil.PerformJSONRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
 		"email":    "missing@example.com",
 		"password": "example-password",
 	})
@@ -348,7 +349,7 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 		t.Fatalf("failed to seed user: %v", err)
 	}
 
-	rec := testutil.PerformJSONRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
 		"email":    "wrong-password@example.com",
 		"password": "incorrect-password",
 	})
@@ -376,21 +377,10 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	t.Helper()
 
-	dsn := testutil.GetIntegrationTestDSN(t)
-
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("failed to create database pool: %v", err)
-	}
-
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Fatalf("failed to ping database: %v", err)
-	}
+	pool := getIntegrationTestPool(t)
 
 	t.Cleanup(func() {
-		testutil.CleanupIntegrationTables(t, pool)
-		pool.Close()
+		cleanupIntegrationTables(t, pool)
 	})
 
 	queries := db.New(pool)
@@ -401,8 +391,8 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 		pool:        pool,
 		queries:     queries,
 		userService: userService,
-		signUp:      CreateSignUpHandler(userService, sessionService),
-		login:       CreateLoginHandler(userService, sessionService),
+		signUp:      handlers.CreateSignUpHandler(userService, sessionService),
+		login:       handlers.CreateLoginHandler(userService, sessionService),
 	}
 }
 

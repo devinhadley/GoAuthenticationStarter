@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// TODO: Set last refreshed at to now when rotating session!
 type SessionQueries interface {
 	CreateSession(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
 	DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error

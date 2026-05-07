@@ -1,4 +1,4 @@
-package middleware
+package integration
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 	"devinhadley/gobootstrapweb/internal/utils"
-	"devinhadley/gobootstrapweb/internal/utils/testutil"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -57,7 +57,7 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		user, err := UserFromContext(r.Context())
+		user, err := middleware.UserFromContext(r.Context())
 		if err != nil {
 			t.Fatalf("failed to get user from context %v", err)
 		}
@@ -69,7 +69,7 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -80,7 +80,7 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 		Secure:   false,
 	}
 
-	res := testutil.PerformJSONRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status ok, got %v", res.Code)
@@ -94,17 +94,17 @@ func testNoSessionCookieContinuesUnauthenticated(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
 
-		_, err := UserFromContext(r.Context())
-		if !errors.Is(err, ErrUserNotInContext) {
-			t.Fatalf("expected error %v, got %v", ErrUserNotInContext, err)
+		_, err := middleware.UserFromContext(r.Context())
+		if !errors.Is(err, middleware.ErrUserNotInContext) {
+			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
 
-	res := testutil.PerformJSONRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{})
+	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{})
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status ok, got %v", res.Code)
@@ -122,15 +122,15 @@ func testMalformedSessionCookieContinuesUnauthenticated(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
 
-		_, err := UserFromContext(r.Context())
-		if !errors.Is(err, ErrUserNotInContext) {
-			t.Fatalf("expected error %v, got %v", ErrUserNotInContext, err)
+		_, err := middleware.UserFromContext(r.Context())
+		if !errors.Is(err, middleware.ErrUserNotInContext) {
+			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -140,7 +140,7 @@ func testMalformedSessionCookieContinuesUnauthenticated(t *testing.T) {
 		Secure:   false,
 	}
 
-	res := testutil.PerformJSONRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status ok, got %v", res.Code)
@@ -158,15 +158,15 @@ func testSessionIDNotFoundContinuesUnauthenticated(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
 
-		_, err := UserFromContext(r.Context())
-		if !errors.Is(err, ErrUserNotInContext) {
-			t.Fatalf("expected error %v, got %v", ErrUserNotInContext, err)
+		_, err := middleware.UserFromContext(r.Context())
+		if !errors.Is(err, middleware.ErrUserNotInContext) {
+			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -176,7 +176,7 @@ func testSessionIDNotFoundContinuesUnauthenticated(t *testing.T) {
 		Secure:   false,
 	}
 
-	res := testutil.PerformJSONRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status ok, got %v", res.Code)
@@ -207,17 +207,17 @@ func testAbsoluteExpiration(t *testing.T) {
 	makeSessionAbsolutelyExpired(t, deps, session.DBSession().ID)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		user, err := UserFromContext(r.Context())
+		user, err := middleware.UserFromContext(r.Context())
 		if user != (db.User{}) {
 			t.Fatalf("wanted empty user but got %v", user)
 		}
-		if !errors.Is(err, ErrUserNotInContext) {
-			t.Fatalf("wanted error %v but got %v", ErrUserNotInContext, err)
+		if !errors.Is(err, middleware.ErrUserNotInContext) {
+			t.Fatalf("wanted error %v but got %v", middleware.ErrUserNotInContext, err)
 		}
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -229,7 +229,7 @@ func testAbsoluteExpiration(t *testing.T) {
 	}
 
 	// Act
-	rec := testutil.PerformJSONRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+	rec := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
 
 	// Assert
 
@@ -310,21 +310,10 @@ type sessionIntegrationTestDependencies struct {
 }
 
 func getTestDependencies(t *testing.T) sessionIntegrationTestDependencies {
-	dsn := testutil.GetIntegrationTestDSN(t)
-
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("failed to create database pool: %v", err)
-	}
-
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Fatalf("failed to ping database: %v", err)
-	}
+	pool := getIntegrationTestPool(t)
 
 	t.Cleanup(func() {
-		testutil.CleanupIntegrationTables(t, pool)
-		pool.Close()
+		cleanupIntegrationTables(t, pool)
 	})
 
 	queries := db.New(pool)

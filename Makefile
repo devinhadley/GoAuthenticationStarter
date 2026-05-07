@@ -35,15 +35,6 @@ compose-down: ## Stop docker compose services
 compose-logs: ## Tail postgres logs
 	@docker compose logs -f postgres
 
-compose-up-integration: ## Start integration postgres via docker compose
-	@docker compose up -d postgres_integration_test
-
-compose-down-integration: ## Stop integration postgres service
-	@docker compose stop postgres_integration_test
-
-compose-logs-integration: ## Tail integration postgres logs
-	@docker compose logs -f postgres_integration_test
-
 sqlc: ## Generate SQLC code
 	@sqlc generate
 
@@ -57,9 +48,4 @@ db-down: ## Roll back one goose migration
 	@set -a; source .env; set +a; goose -dir "$${GOOSE_MIGRATION_DIR}" down
 
 test-integration: ## Run integration tests against integration DB
-	@set -a; source .env; set +a; \
-		docker compose up -d postgres_integration_test; \
-		trap 'docker compose stop postgres_integration_test >/dev/null 2>&1; docker compose rm -f postgres_integration_test >/dev/null 2>&1' EXIT; \
-		until docker compose exec -T postgres_integration_test pg_isready -U integration_user -d gobootstrapweb_test >/dev/null 2>&1; do sleep 1; done; \
-		GOOSE_DBSTRING="$${INTEGRATION_TEST_DB_DSN}" goose -dir "$${GOOSE_MIGRATION_DIR}" up; \
-		go test ./internal/... -run Integration
+	go test -p 1 ./internal/integration/...
