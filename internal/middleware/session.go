@@ -11,8 +11,6 @@ import (
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 	"devinhadley/gobootstrapweb/internal/utils"
-
-	"github.com/jackc/pgx/v5"
 )
 
 type contextKey struct {
@@ -64,9 +62,9 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 			return
 		}
 
-		session, err := sessionService.GetSession(r.Context(), sessionID)
+		curSession, err := sessionService.GetSession(r.Context(), sessionID)
 		if err != nil {
-			if err == pgx.ErrNoRows {
+			if err == session.ErrSessionNotFound {
 				utils.ClearSessionCookie(w)
 				next.ServeHTTP(w, r)
 				return
@@ -77,8 +75,8 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 			return
 		}
 
-		if session.IsExpired() {
-			err = sessionService.ExpireSession(r.Context(), session.DBSession().ID)
+		if curSession.IsExpired() {
+			err = sessionService.ExpireSession(r.Context(), curSession.DBSession().ID)
 			if err != nil {
 				log.Printf("Error when expiring session: %v", err)
 			}
@@ -88,24 +86,24 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 		}
 
 		// TODO: Update last refreshed at also.
-		if session.ShouldRotate() {
-			session, err = sessionService.RotateSession(r.Context(), session.DBSession().ID)
+		if curSession.ShouldRotate() {
+			curSession, err = sessionService.RotateSession(r.Context(), curSession.DBSession().ID)
 			if err != nil {
 				log.Printf("Error when rotating session: %v", err)
 				next.ServeHTTP(w, r)
 				return
 			}
-			utils.AddSessionToCookie(w, session.DBSession().ID, session.GetAbsoluteExpiration())
+			utils.AddSessionToCookie(w, curSession.DBSession().ID, curSession.GetAbsoluteExpiration())
 		}
 
-		err = sessionService.UpdateLastSeen(r.Context(), session)
+		err = sessionService.UpdateLastSeen(r.Context(), curSession)
 		if err != nil {
 			log.Printf("Error when updating last seen for session: %v", err)
 		}
 
 		// Add a closure to the context which allows lazy fetch of the current user.
 		requestCtx := r.Context()
-		ctx := withGetUser(requestCtx, createGetUserFunc(session.DBSession().UserID, userService, requestCtx))
+		ctx := withGetUser(requestCtx, createGetUserFunc(curSession.DBSession().UserID, userService, requestCtx))
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)

@@ -230,10 +230,10 @@ func testRotateSession(t *testing.T) {
 	ctx := context.Background()
 	originalID := []byte("current-session-id")
 
-	var updateSessionIDArg db.UpdateSessionIDParams
+	var updateSessionIDArg db.UpdateSessionIDAndRefreshedAtParams
 
 	sessionService := NewService(&mockSessionQueries{
-		UpdateSessionIDFn: func(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error) {
+		UpdateSessionIDAndRefreshedAtFn: func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
 			updateSessionIDArg = arg
 
 			if !bytes.Equal(arg.ID, originalID) {
@@ -274,7 +274,7 @@ func testRotateSessionReturnsUpdateError(t *testing.T) {
 	wantErr := errors.New("failed update")
 
 	sessionService := NewService(&mockSessionQueries{
-		UpdateSessionIDFn: func(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error) {
+		UpdateSessionIDAndRefreshedAtFn: func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
 			return db.Session{}, wantErr
 		},
 	})
@@ -290,7 +290,7 @@ func testRotateSessionReturnsSessionNotFound(t *testing.T) {
 	originalID := []byte("missing-session-id")
 
 	sessionService := NewService(&mockSessionQueries{
-		UpdateSessionIDFn: func(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error) {
+		UpdateSessionIDAndRefreshedAtFn: func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
 			return db.Session{}, pgx.ErrNoRows
 		},
 	})
@@ -500,7 +500,7 @@ type mockSessionQueries struct {
 	DeactivateSessionFn                         func(ctx context.Context, id []byte) error
 	GetSessionFn                                func(ctx context.Context, id []byte) (db.Session, error)
 	GetSessionCountByUserFn                     func(ctx context.Context, userID int64) (int64, error)
-	UpdateSessionIDFn                           func(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error)
+	UpdateSessionIDAndRefreshedAtFn             func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error)
 	UpdateSessionLastSeenToNowFn                func(ctx context.Context, id []byte) (db.Session, error)
 }
 
@@ -544,9 +544,9 @@ func (q *mockSessionQueries) GetSessionCountByUser(ctx context.Context, userID i
 	return 0, nil
 }
 
-func (q *mockSessionQueries) UpdateSessionID(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error) {
-	if q.UpdateSessionIDFn != nil {
-		return q.UpdateSessionIDFn(ctx, arg)
+func (q *mockSessionQueries) UpdateSessionIDAndRefreshedAt(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
+	if q.UpdateSessionIDAndRefreshedAtFn != nil {
+		return q.UpdateSessionIDAndRefreshedAtFn(ctx, arg)
 	}
 
 	return db.Session{ID: arg.ID_2}, nil

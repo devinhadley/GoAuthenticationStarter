@@ -100,20 +100,20 @@ func (q *Queries) GetSessionCountByUser(ctx context.Context, userID int64) (int6
 	return count, err
 }
 
-const updateSessionID = `-- name: UpdateSessionID :one
+const updateSessionIDAndRefreshedAt = `-- name: UpdateSessionIDAndRefreshedAt :one
 UPDATE sessions
-SET id = $2
+SET id = $2, last_refreshed_at = NOW()
 WHERE id = $1 and is_active = TRUE
 RETURNING id, user_id, created_at, last_seen_at, last_refreshed_at, is_active
 `
 
-type UpdateSessionIDParams struct {
+type UpdateSessionIDAndRefreshedAtParams struct {
 	ID   []byte
 	ID_2 []byte
 }
 
-func (q *Queries) UpdateSessionID(ctx context.Context, arg UpdateSessionIDParams) (Session, error) {
-	row := q.db.QueryRow(ctx, updateSessionID, arg.ID, arg.ID_2)
+func (q *Queries) UpdateSessionIDAndRefreshedAt(ctx context.Context, arg UpdateSessionIDAndRefreshedAtParams) (Session, error) {
+	row := q.db.QueryRow(ctx, updateSessionIDAndRefreshedAt, arg.ID, arg.ID_2)
 	var i Session
 	err := row.Scan(
 		&i.ID,

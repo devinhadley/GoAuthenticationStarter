@@ -17,7 +17,7 @@ type SessionQueries interface {
 	DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error
 	GetSession(ctx context.Context, id []byte) (db.Session, error)
 	GetSessionCountByUser(ctx context.Context, userID int64) (int64, error)
-	UpdateSessionID(ctx context.Context, arg db.UpdateSessionIDParams) (db.Session, error)
+	UpdateSessionIDAndRefreshedAt(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error)
 	UpdateSessionLastSeenToNow(ctx context.Context, id []byte) (db.Session, error)
 	DeactivateSession(ctx context.Context, id []byte) error
 }
@@ -78,6 +78,9 @@ func (s *Service) CreateSession(ctx context.Context, user db.User) (Session, err
 func (s *Service) GetSession(ctx context.Context, sessionID []byte) (Session, error) {
 	session, err := s.queries.GetSession(ctx, sessionID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Session{}, ErrSessionNotFound
+		}
 		return Session{}, err
 	}
 
@@ -107,7 +110,7 @@ func (s *Service) RotateSession(ctx context.Context, sessionID []byte) (Session,
 		return Session{}, err
 	}
 
-	updatedSession, err := s.queries.UpdateSessionID(ctx, db.UpdateSessionIDParams{
+	updatedSession, err := s.queries.UpdateSessionIDAndRefreshedAt(ctx, db.UpdateSessionIDAndRefreshedAtParams{
 		ID:   sessionID,
 		ID_2: rotatedSessionID,
 	})

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -26,12 +27,11 @@ func TestSessionMiddlewareCanAuthenticateIntegration(t *testing.T) {
 
 func TestExpiredSessionIntegration(t *testing.T) {
 	t.Run("absolute expired session does not authenticate and deactivates session", testAbsoluteExpiration)
-	t.Run("idle expired session does not authenticate and deactivates session", needsImplemented)
-	t.Run("expired session clears cookie", needsImplemented)
+	t.Run("idle expired session does not authenticate and deactivates session", testIdleExpiration)
 }
 
 func TestRotateSessionIntegration(t *testing.T) {
-	t.Run("session outside rotation threshold rotates and sets new cookie", needsImplemented)
+	t.Run("session outside rotation threshold rotates and sets new cookie", testSessionRotation)
 	t.Run("session inside rotation threshold does not rotate", needsImplemented)
 	t.Run("rotate session error continues without rotated cookie", needsImplemented)
 }
@@ -257,6 +257,160 @@ func testAbsoluteExpiration(t *testing.T) {
 	}
 }
 
+func testIdleExpiration(t *testing.T) {
+	deps := getTestDependencies(t)
+
+	createdUser, err := deps.userService.SignUp(context.Background(), user.AuthenticateBody{
+		Email:    "test@example.com",
+		Password: "a-password-!-9999",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user %v", err)
+	}
+	session, err := deps.sessionService.CreateSession(context.Background(), createdUser)
+	if err != nil {
+		t.Fatalf("failed to create test session %v", err)
+	}
+
+	makeSessionIdleExpired(t, deps, session.DBSession().ID)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		currentUser, err := middleware.UserFromContext(r.Context())
+		if currentUser != (db.User{}) {
+			t.Fatalf("wanted empty user but got %v", currentUser)
+		}
+		if !errors.Is(err, middleware.ErrUserNotInContext) {
+			t.Fatalf("wanted error %v but got %v", middleware.ErrUserNotInContext, err)
+		}
+		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+	}
+
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(session.DBSession().ID),
+		Expires:  session.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+
+	if rec.Result().StatusCode != http.StatusOK {
+		t.Fatalf("wanted response status code %v, got %v", http.StatusOK, rec.Result().StatusCode)
+	}
+
+	assertSessionExpired(t, deps, session.DBSession().ID)
+
+	foundClearedCookie := false
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			foundClearedCookie = true
+			if cookie.MaxAge != -1 {
+				t.Fatalf("expected cleared session cookie max age -1, got %d", cookie.MaxAge)
+			}
+		}
+	}
+
+	if !foundClearedCookie {
+		t.Fatal("expected middleware to clear session cookie")
+	}
+}
+
+func testSessionRotation(t *testing.T) {
+	// Arrange
+	// Create user, create session [x]
+	// Set session last refreshed at to 8 days. [x]
+	// Act
+	// Call the handler[x]
+	// Assert response code OK [x]
+	// Assert can authenticate user. [x]
+	// Assert the session id has changed. [x]
+	// Assert the last refresh at has increased. []
+
+	deps := getTestDependencies(t)
+	ctx := context.Background()
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    "test@example.com",
+		Password: "a-password-!-9999",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user %v", err)
+	}
+	createdSession, err := deps.sessionService.CreateSession(context.Background(), createdUser)
+	if err != nil {
+		t.Fatalf("failed to create test session %v", err)
+	}
+
+	makeSessionNeedRefresh(t, deps, createdSession.DBSession().ID)
+
+	handler := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, func(w http.ResponseWriter, r *http.Request) {
+		user, err := middleware.UserFromContext(r.Context())
+		if err != nil {
+			t.Fatalf("wanted no error when getting user but got %v", err)
+		}
+
+		if user.ID != createdUser.ID {
+			t.Fatalf("wanted user id %v but got %v", createdUser.ID, user.ID)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(createdSession.DBSession().ID),
+		Expires:  createdSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(handler, http.MethodPost, "/test", map[string]any{}, &sessionCookie)
+
+	if rec.Result().StatusCode != http.StatusOK {
+		t.Fatalf("wanted status %v but got %v", http.StatusOK, rec.Result().StatusCode)
+	}
+
+	var rotatedSessionID []byte
+	foundRotatedCookie := false
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			foundRotatedCookie = true
+			rotatedSessionID, err = base64.StdEncoding.DecodeString(cookie.Value)
+			if err != nil {
+				t.Fatalf("failed to decode rotated session cookie: %v", err)
+			}
+			break
+		}
+	}
+
+	if !foundRotatedCookie {
+		t.Fatal("expected middleware to set rotated session cookie")
+	}
+
+	newSession, err := deps.sessionService.GetSession(ctx, rotatedSessionID)
+	if err != nil {
+		t.Fatalf("failed to get rotated session %v", err)
+	}
+
+	_, err = deps.sessionService.GetSession(ctx, createdSession.DBSession().ID)
+	if !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("expected old session id to be missing with %v but got %v", session.ErrSessionNotFound, err)
+	}
+
+	if bytes.Equal(newSession.DBSession().ID, createdSession.DBSession().ID) {
+		t.Fatalf("session id didn't change: %v", newSession.DBSession().ID)
+	}
+
+	if !newSession.DBSession().LastRefreshedAt.Time.After(createdSession.DBSession().LastRefreshedAt.Time) {
+		t.Fatalf("wanted last refresh date: %v to be later after update but got %v", createdSession.DBSession().LastRefreshedAt.Time, newSession.DBSession().LastRefreshedAt.Time)
+	}
+}
+
 func needsImplemented(t *testing.T) {
 	t.Skip("needs implemented")
 }
@@ -278,6 +432,48 @@ func makeSessionAbsolutelyExpired(t *testing.T, deps sessionIntegrationTestDepen
 
 	if tag.RowsAffected() != 1 {
 		t.Fatalf("wanted 1 row affected when expiring session, got %d", tag.RowsAffected())
+	}
+}
+
+func makeSessionIdleExpired(t *testing.T, deps sessionIntegrationTestDependencies, sessionId []byte) {
+	t.Helper()
+
+	fifteenDaysAgo := time.Now().AddDate(0, 0, -15)
+
+	query := `
+	UPDATE sessions
+	SET created_at = $2,
+	    last_seen_at = $2
+	WHERE id = $1;
+	`
+	tag, err := deps.pool.Exec(context.Background(), query, sessionId, fifteenDaysAgo)
+	if err != nil {
+		t.Fatalf("failed to make session idle expired %v", err)
+	}
+
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("wanted 1 row affected when idling session, got %d", tag.RowsAffected())
+	}
+}
+
+func makeSessionNeedRefresh(t *testing.T, deps sessionIntegrationTestDependencies, sessionId []byte) {
+	t.Helper()
+
+	eightDaysAgo := time.Now().AddDate(0, 0, -8)
+
+	query := `
+	UPDATE sessions
+	SET created_at = $2,
+	    last_refreshed_at = $2
+	WHERE id = $1;
+	`
+	tag, err := deps.pool.Exec(context.Background(), query, sessionId, eightDaysAgo)
+	if err != nil {
+		t.Fatalf("failed to make session idle expired %v", err)
+	}
+
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("wanted 1 row affected when idling session, got %d", tag.RowsAffected())
 	}
 }
 

@@ -23,9 +23,9 @@ SELECT COUNT(*)
 FROM sessions
 WHERE user_id = $1 and is_active = TRUE;
 
--- name: UpdateSessionID :one
+-- name: UpdateSessionIDAndRefreshedAt :one
 UPDATE sessions
-SET id = $2
+SET id = $2, last_refreshed_at = NOW()
 WHERE id = $1 and is_active = TRUE
 RETURNING *;
 

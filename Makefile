@@ -49,3 +49,6 @@ db-down: ## Roll back one goose migration
 
 test-integration: ## Run integration tests against integration DB
 	go test -p 1 ./internal/integration/...
+
+debug-integration: ## Runs integration tests via dlv debugger.
+	dlv test ./internal/integration -- -test.v
