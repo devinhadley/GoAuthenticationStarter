@@ -193,10 +193,8 @@ func testSessionIDNotFoundContinuesUnauthenticated(t *testing.T) {
 }
 
 func testAbsoluteExpiration(t *testing.T) {
-	// Arrange
 	deps := getTestDependencies(t)
 
-	// Create user
 	createdUser, err := deps.userService.SignUp(context.Background(), user.AuthenticateBody{
 		Email:    "test@example.com",
 		Password: "a-password-!-9999",
@@ -325,16 +323,6 @@ func testIdleExpiration(t *testing.T) {
 }
 
 func testSessionRotation(t *testing.T) {
-	// Arrange
-	// Create user, create session [x]
-	// Set session last refreshed at to 8 days. [x]
-	// Act
-	// Call the handler[x]
-	// Assert response code OK [x]
-	// Assert can authenticate user. [x]
-	// Assert the session id has changed. [x]
-	// Assert the last refresh at has increased. []
-
 	deps := getTestDependencies(t)
 	ctx := context.Background()
 

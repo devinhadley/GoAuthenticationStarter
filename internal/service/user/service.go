@@ -112,6 +112,10 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 		return db.User{}, err
 	}
 
+	if !user.IsActive {
+		return db.User{}, ErrInvalidCredentials
+	}
+
 	ok, err = argon2.VerifyEncoded([]byte(input.Password), []byte(user.PasswordHash))
 	if err != nil {
 		return db.User{}, err

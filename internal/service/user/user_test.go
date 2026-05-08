@@ -33,6 +33,7 @@ func TestLogIn(t *testing.T) {
 	t.Run("log in returns invalid credentials when user does not exist", testUserLogInUserNotFound)
 	t.Run("log in returns invalid credentials for wrong password", testUserLogInWrongPassword)
 	t.Run("log in propagates unexpected query error", testUserLogInPropagatesUnexpectedError)
+	t.Run("logging in fails with inactive user", testLogInWhenUserInactive)
 }
 
 func TestGetUserByID(t *testing.T) {
@@ -206,6 +207,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 				ID:           1,
 				Email:        arg.Email,
 				PasswordHash: arg.PasswordHash,
+				IsActive:     true,
 			}, nil
 		},
 	})
@@ -279,7 +281,7 @@ func testUserLogIn(t *testing.T) {
 
 	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
-			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash)}, nil
+			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
 	})
 
@@ -348,7 +350,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 
 	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
-			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash)}, nil
+			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
 	})
 
@@ -419,6 +421,36 @@ func testUserLogInPropagatesUnexpectedError(t *testing.T) {
 	}
 }
 
+func testLogInWhenUserInactive(t *testing.T) {
+	id := int64(1)
+	password := "password"
+
+	argon := argon2.MemoryConstrainedDefaults()
+	passwordHash, err := argon.HashEncoded([]byte(password))
+	if err != nil {
+		t.Fatalf("failed to hash initial password: %v", err)
+	}
+
+	userService := setupUserService(t, mocks.MockUserQueries{
+		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
+			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: false}, nil
+		},
+	})
+
+	usr, err := userService.LogIn(context.Background(), AuthenticateBody{
+		Email:    "test@example.com",
+		Password: password,
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wanted error %v but got %v", ErrInvalidCredentials, err)
+	}
+
+	if usr != (db.User{}) {
+		t.Fatalf("wanted user %v but got %v", db.User{}, usr)
+	}
+}
+
 func testGetUserByID(t *testing.T) {
 	ctx := context.Background()
 	wantID := int64(42)
@@ -430,7 +462,7 @@ func testGetUserByID(t *testing.T) {
 				t.Fatalf("GetUserByID got id %v, want %v", id, wantID)
 			}
 
-			return db.User{ID: id, Email: wantEmail}, nil
+			return db.User{ID: id, Email: wantEmail, IsActive: true}, nil
 		},
 	})
 
