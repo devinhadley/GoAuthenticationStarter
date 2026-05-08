@@ -85,15 +85,14 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 			return
 		}
 
-		// TODO: Update last refreshed at also.
 		if curSession.ShouldRotate() {
-			curSession, err = sessionService.RotateSession(r.Context(), curSession.DBSession().ID)
+			rotatedSession, err := sessionService.RotateSession(r.Context(), curSession.DBSession().ID)
 			if err != nil {
 				log.Printf("Error when rotating session: %v", err)
-				next.ServeHTTP(w, r)
-				return
+			} else {
+				curSession = rotatedSession
+				utils.AddSessionToCookie(w, curSession.DBSession().ID, curSession.GetAbsoluteExpiration())
 			}
-			utils.AddSessionToCookie(w, curSession.DBSession().ID, curSession.GetAbsoluteExpiration())
 		}
 
 		err = sessionService.UpdateLastSeen(r.Context(), curSession)

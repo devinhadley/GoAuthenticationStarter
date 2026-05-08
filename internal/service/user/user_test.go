@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/testutil/mocks"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -40,7 +41,7 @@ func TestGetUserByID(t *testing.T) {
 }
 
 func testUserSignUp(t *testing.T) {
-	userService := setupUserService(t, MockUserQueries{})
+	userService := setupUserService(t, mocks.MockUserQueries{})
 	ctx := context.Background()
 
 	input := AuthenticateBody{
@@ -68,7 +69,7 @@ func testUserSignUp(t *testing.T) {
 
 func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for invalid sign-up input")
 			return db.User{}, nil
@@ -103,7 +104,7 @@ func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 
 func testUserSignUpRejectsShortPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for short password")
 			return db.User{}, nil
@@ -122,7 +123,7 @@ func testUserSignUpRejectsShortPassword(t *testing.T) {
 
 func testUserSignUpRejectsLongPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for long password")
 			return db.User{}, nil
@@ -142,7 +143,7 @@ func testUserSignUpRejectsLongPassword(t *testing.T) {
 func testUserSignUpRejectsCommonPassword(t *testing.T) {
 	ctx := context.Background()
 	commonPassword := "thisiscommonpassword"
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for common password")
 			return db.User{}, nil
@@ -162,7 +163,7 @@ func testUserSignUpRejectsCommonPassword(t *testing.T) {
 
 func testUserSignUpRejectsInvalidEmail(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for invalid email")
 			return db.User{}, nil
@@ -195,7 +196,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 	inputEmail := "  User@Example.COM  "
 	expectedEmail := "User@example.com"
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			if arg.Email != expectedEmail {
 				t.Fatalf("CreateUser got email %q, want %q", arg.Email, expectedEmail)
@@ -224,7 +225,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 
 func testUserSignUpEmailTaken(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, &pgconn.PgError{
 				Code:           "23505",
@@ -247,7 +248,7 @@ func testUserSignUpPropagatesUnexpectedError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, expectedErr
 		},
@@ -276,7 +277,7 @@ func testUserLogIn(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash)}, nil
 		},
@@ -305,7 +306,7 @@ func testUserLogIn(t *testing.T) {
 
 func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid log-in input")
 			return db.User{}, nil
@@ -345,7 +346,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash)}, nil
 		},
@@ -363,7 +364,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 
 func testUserLogInRejectsInvalidEmail(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid email")
 			return db.User{}, nil
@@ -382,7 +383,7 @@ func testUserLogInRejectsInvalidEmail(t *testing.T) {
 
 func testUserLogInUserNotFound(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, pgx.ErrNoRows
 		},
@@ -402,7 +403,7 @@ func testUserLogInPropagatesUnexpectedError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, expectedErr
 		},
@@ -423,7 +424,7 @@ func testGetUserByID(t *testing.T) {
 	wantID := int64(42)
 	wantEmail := "test@example.com"
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			if id != wantID {
 				t.Fatalf("GetUserByID got id %v, want %v", id, wantID)
@@ -451,7 +452,7 @@ func testGetUserByIDPropagatesError(t *testing.T) {
 	ctx := context.Background()
 	wantErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, MockUserQueries{
+	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{}, wantErr
 		},
@@ -463,48 +464,7 @@ func testGetUserByIDPropagatesError(t *testing.T) {
 	}
 }
 
-func setupUserService(t *testing.T, mockedQueries MockUserQueries) *Service {
+func setupUserService(t *testing.T, mockedQueries mocks.MockUserQueries) *Service {
 	t.Helper()
 	return NewService(&mockedQueries)
-}
-
-// Mocks...
-type MockUserQueries struct {
-	CreateUserFn     func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
-	GetUserByEmailFn func(ctx context.Context, email string) (db.User, error)
-	GetUserByIDFn    func(ctx context.Context, id int64) (db.User, error)
-}
-
-func (q *MockUserQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
-	if q.CreateUserFn != nil {
-		return q.CreateUserFn(ctx, arg)
-	}
-
-	return db.User{
-		ID:           1,
-		Email:        arg.Email,
-		PasswordHash: arg.PasswordHash,
-	}, nil
-}
-
-func (q *MockUserQueries) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
-	if q.GetUserByEmailFn != nil {
-		return q.GetUserByEmailFn(ctx, email)
-	}
-
-	return db.User{
-		ID:    1,
-		Email: email,
-	}, nil
-}
-
-func (q *MockUserQueries) GetUserByID(ctx context.Context, id int64) (db.User, error) {
-	if q.GetUserByIDFn != nil {
-		return q.GetUserByIDFn(ctx, id)
-	}
-
-	return db.User{
-		ID:    id,
-		Email: "test@example.com",
-	}, nil
 }

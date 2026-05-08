@@ -1,0 +1,115 @@
+package mocks
+
+import (
+	"context"
+
+	"devinhadley/gobootstrapweb/internal/db"
+
+	"github.com/jackc/pgx/v5"
+)
+
+type MockUserQueries struct {
+	CreateUserFn     func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
+	GetUserByEmailFn func(ctx context.Context, email string) (db.User, error)
+	GetUserByIDFn    func(ctx context.Context, id int64) (db.User, error)
+}
+
+func (q *MockUserQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
+	if q.CreateUserFn != nil {
+		return q.CreateUserFn(ctx, arg)
+	}
+
+	return db.User{
+		ID:           1,
+		Email:        arg.Email,
+		PasswordHash: arg.PasswordHash,
+	}, nil
+}
+
+func (q *MockUserQueries) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	if q.GetUserByEmailFn != nil {
+		return q.GetUserByEmailFn(ctx, email)
+	}
+
+	return db.User{
+		ID:    1,
+		Email: email,
+	}, nil
+}
+
+func (q *MockUserQueries) GetUserByID(ctx context.Context, id int64) (db.User, error) {
+	if q.GetUserByIDFn != nil {
+		return q.GetUserByIDFn(ctx, id)
+	}
+
+	return db.User{
+		ID:    id,
+		Email: "test@example.com",
+	}, nil
+}
+
+type MockSessionQueries struct {
+	CreateSessionFn                             func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
+	DeactivateLeastRecentlyUsedSessionForUserFn func(ctx context.Context, userID int64) error
+	DeactivateSessionFn                         func(ctx context.Context, id []byte) error
+	GetSessionFn                                func(ctx context.Context, id []byte) (db.Session, error)
+	GetSessionCountByUserFn                     func(ctx context.Context, userID int64) (int64, error)
+	UpdateSessionIDAndRefreshedAtFn             func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error)
+	UpdateSessionLastSeenToNowFn                func(ctx context.Context, id []byte) (db.Session, error)
+}
+
+func (q *MockSessionQueries) CreateSession(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
+	if q.CreateSessionFn != nil {
+		return q.CreateSessionFn(ctx, arg)
+	}
+
+	return db.Session{ID: arg.ID, UserID: arg.UserID}, nil
+}
+
+func (q *MockSessionQueries) DeactivateSession(ctx context.Context, id []byte) error {
+	if q.DeactivateSessionFn != nil {
+		return q.DeactivateSessionFn(ctx, id)
+	}
+
+	return nil
+}
+
+func (q *MockSessionQueries) DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error {
+	if q.DeactivateLeastRecentlyUsedSessionForUserFn != nil {
+		return q.DeactivateLeastRecentlyUsedSessionForUserFn(ctx, userID)
+	}
+
+	return nil
+}
+
+func (q *MockSessionQueries) GetSession(ctx context.Context, id []byte) (db.Session, error) {
+	if q.GetSessionFn != nil {
+		return q.GetSessionFn(ctx, id)
+	}
+
+	return db.Session{}, pgx.ErrNoRows
+}
+
+func (q *MockSessionQueries) GetSessionCountByUser(ctx context.Context, userID int64) (int64, error) {
+	if q.GetSessionCountByUserFn != nil {
+		return q.GetSessionCountByUserFn(ctx, userID)
+	}
+
+	return 0, nil
+}
+
+func (q *MockSessionQueries) UpdateSessionIDAndRefreshedAt(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
+	if q.UpdateSessionIDAndRefreshedAtFn != nil {
+		return q.UpdateSessionIDAndRefreshedAtFn(ctx, arg)
+	}
+
+	return db.Session{ID: arg.ID_2}, nil
+}
+
+func (q *MockSessionQueries) UpdateSessionLastSeenToNow(ctx context.Context, id []byte) (db.Session, error) {
+	if q.UpdateSessionLastSeenToNowFn != nil {
+		return q.UpdateSessionLastSeenToNowFn(ctx, id)
+	}
+
+	return db.Session{ID: id}, nil
+}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/testutil/mocks"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -60,7 +61,7 @@ func testCreateValidSession(t *testing.T) {
 
 	var createSessionArg db.CreateSessionParams
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		CreateSessionFn: func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
 			createSessionArg = arg
 
@@ -107,7 +108,7 @@ func testCreateSessionReturnsUserNotFound(t *testing.T) {
 	ctx := context.Background()
 	user := db.User{ID: 999}
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		CreateSessionFn: func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
 			return db.Session{}, &pgconn.PgError{
 				Code:           "23503",
@@ -127,7 +128,7 @@ func testCreateSessionReturnsSessionCountError(t *testing.T) {
 	user := db.User{ID: 99}
 	wantErr := errors.New("failed to get session count")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		GetSessionCountByUserFn: func(ctx context.Context, userID int64) (int64, error) {
 			return 0, wantErr
 		},
@@ -148,7 +149,7 @@ func testCreateSessionReturnsDeleteLeastRecentlyUsedSessionError(t *testing.T) {
 	user := db.User{ID: 42}
 	wantErr := errors.New("failed to delete least recently used session")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		GetSessionCountByUserFn: func(ctx context.Context, userID int64) (int64, error) {
 			return MaxNumberOfActiveSessions, nil
 		},
@@ -172,7 +173,7 @@ func testCreateSessionReturnsCreateSessionError(t *testing.T) {
 	user := db.User{ID: 7}
 	wantErr := errors.New("failed to create session")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		CreateSessionFn: func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
 			return db.Session{}, wantErr
 		},
@@ -190,7 +191,7 @@ func testCreateSessionDeletesOldestWhenSessionCountExceedsLimit(t *testing.T) {
 
 	deleteOldestCalled := false
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		GetSessionCountByUserFn: func(ctx context.Context, userID int64) (int64, error) {
 			if userID != user.ID {
 				t.Fatalf("GetSessionCountByUser got user id %v, want %v", userID, user.ID)
@@ -232,7 +233,7 @@ func testRotateSession(t *testing.T) {
 
 	var updateSessionIDArg db.UpdateSessionIDAndRefreshedAtParams
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		UpdateSessionIDAndRefreshedAtFn: func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
 			updateSessionIDArg = arg
 
@@ -273,7 +274,7 @@ func testRotateSessionReturnsUpdateError(t *testing.T) {
 	originalID := []byte("current-session-id")
 	wantErr := errors.New("failed update")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		UpdateSessionIDAndRefreshedAtFn: func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
 			return db.Session{}, wantErr
 		},
@@ -289,7 +290,7 @@ func testRotateSessionReturnsSessionNotFound(t *testing.T) {
 	ctx := context.Background()
 	originalID := []byte("missing-session-id")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		UpdateSessionIDAndRefreshedAtFn: func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
 			return db.Session{}, pgx.ErrNoRows
 		},
@@ -358,7 +359,7 @@ func testUpdateLastSeenDoesNotUpdateBeforeThreshold(t *testing.T) {
 	ctx := context.Background()
 	updateCalled := false
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		UpdateSessionLastSeenToNowFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			updateCalled = true
 			return db.Session{}, nil
@@ -389,7 +390,7 @@ func testUpdateLastSeenUpdatesAfterThreshold(t *testing.T) {
 	}
 
 	updateCalled := false
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		UpdateSessionLastSeenToNowFn: func(callCtx context.Context, id []byte) (db.Session, error) {
 			updateCalled = true
 
@@ -424,7 +425,7 @@ func testUpdateLastSeenReturnsUpdateError(t *testing.T) {
 		LastSeenAt: pgtype.Timestamptz{Time: time.Now().Add(-(20 * time.Minute) - time.Second), Valid: true},
 	}
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		UpdateSessionLastSeenToNowFn: func(callCtx context.Context, id []byte) (db.Session, error) {
 			if callCtx != ctx {
 				t.Fatal("UpdateSessionLastSeenToNow called with unexpected context")
@@ -449,7 +450,7 @@ func testGetSessionReturnsError(t *testing.T) {
 	sessionID := []byte("session-id")
 	wantErr := errors.New("failed to get session")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		GetSessionFn: func(callCtx context.Context, id []byte) (db.Session, error) {
 			if callCtx != ctx {
 				t.Fatal("GetSessionByID called with unexpected context")
@@ -474,7 +475,7 @@ func testExpireSessionReturnsError(t *testing.T) {
 	sessionID := []byte("session-id")
 	wantErr := errors.New("failed to expire session")
 
-	sessionService := NewService(&mockSessionQueries{
+	sessionService := NewService(&mocks.MockSessionQueries{
 		DeactivateSessionFn: func(callCtx context.Context, id []byte) error {
 			if callCtx != ctx {
 				t.Fatal("DeleteSessionByID called with unexpected context")
@@ -492,70 +493,4 @@ func testExpireSessionReturnsError(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("got error %v, want %v", err, wantErr)
 	}
-}
-
-type mockSessionQueries struct {
-	CreateSessionFn                             func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
-	DeactivateLeastRecentlyUsedSessionForUserFn func(ctx context.Context, userID int64) error
-	DeactivateSessionFn                         func(ctx context.Context, id []byte) error
-	GetSessionFn                                func(ctx context.Context, id []byte) (db.Session, error)
-	GetSessionCountByUserFn                     func(ctx context.Context, userID int64) (int64, error)
-	UpdateSessionIDAndRefreshedAtFn             func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error)
-	UpdateSessionLastSeenToNowFn                func(ctx context.Context, id []byte) (db.Session, error)
-}
-
-func (q *mockSessionQueries) CreateSession(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
-	if q.CreateSessionFn != nil {
-		return q.CreateSessionFn(ctx, arg)
-	}
-
-	return db.Session{ID: arg.ID, UserID: arg.UserID}, nil
-}
-
-func (q *mockSessionQueries) DeactivateSession(ctx context.Context, id []byte) error {
-	if q.DeactivateSessionFn != nil {
-		return q.DeactivateSessionFn(ctx, id)
-	}
-
-	return nil
-}
-
-func (q *mockSessionQueries) DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error {
-	if q.DeactivateLeastRecentlyUsedSessionForUserFn != nil {
-		return q.DeactivateLeastRecentlyUsedSessionForUserFn(ctx, userID)
-	}
-
-	return nil
-}
-
-func (q *mockSessionQueries) GetSession(ctx context.Context, id []byte) (db.Session, error) {
-	if q.GetSessionFn != nil {
-		return q.GetSessionFn(ctx, id)
-	}
-
-	return db.Session{}, nil
-}
-
-func (q *mockSessionQueries) GetSessionCountByUser(ctx context.Context, userID int64) (int64, error) {
-	if q.GetSessionCountByUserFn != nil {
-		return q.GetSessionCountByUserFn(ctx, userID)
-	}
-
-	return 0, nil
-}
-
-func (q *mockSessionQueries) UpdateSessionIDAndRefreshedAt(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error) {
-	if q.UpdateSessionIDAndRefreshedAtFn != nil {
-		return q.UpdateSessionIDAndRefreshedAtFn(ctx, arg)
-	}
-
-	return db.Session{ID: arg.ID_2}, nil
-}
-
-func (q *mockSessionQueries) UpdateSessionLastSeenToNow(ctx context.Context, id []byte) (db.Session, error) {
-	if q.UpdateSessionLastSeenToNowFn != nil {
-		return q.UpdateSessionLastSeenToNowFn(ctx, id)
-	}
-
-	return db.Session{ID: id}, nil
 }

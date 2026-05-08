@@ -32,8 +32,6 @@ func TestExpiredSessionIntegration(t *testing.T) {
 
 func TestRotateSessionIntegration(t *testing.T) {
 	t.Run("session outside rotation threshold rotates and sets new cookie", testSessionRotation)
-	t.Run("session inside rotation threshold does not rotate", needsImplemented)
-	t.Run("rotate session error continues without rotated cookie", needsImplemented)
 }
 
 func TestUpdateLastSeenIntegration(t *testing.T) {
@@ -43,15 +41,16 @@ func TestUpdateLastSeenIntegration(t *testing.T) {
 
 func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 	deps := getTestDependencies(t)
+	ctx := context.Background()
 
-	createdUser, err := deps.userService.SignUp(context.Background(), user.AuthenticateBody{
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
 		Email:    "test@example.com",
 		Password: "a-password-!-9999",
 	})
 	if err != nil {
 		t.Fatalf("failed to create test user %v", err)
 	}
-	session, err := deps.sessionService.CreateSession(context.Background(), createdUser)
+	createdSession, err := deps.sessionService.CreateSession(ctx, createdUser)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -73,8 +72,8 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(session.DBSession().ID),
-		Expires:  session.GetAbsoluteExpiration(),
+		Value:    base64.StdEncoding.EncodeToString(createdSession.DBSession().ID),
+		Expires:  createdSession.GetAbsoluteExpiration(),
 		HttpOnly: true,
 		Path:     "/",
 		Secure:   false,
@@ -84,6 +83,12 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected status ok, got %v", res.Code)
+	}
+
+	// Ensure session ID remains the same...
+	_, err = deps.sessionService.GetSession(ctx, createdSession.DBSession().ID)
+	if err != nil {
+		t.Fatalf("error when ensuring session still exists with same id %v", err)
 	}
 }
 
