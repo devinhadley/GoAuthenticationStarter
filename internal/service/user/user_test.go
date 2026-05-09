@@ -41,6 +41,11 @@ func TestGetUserByID(t *testing.T) {
 	t.Run("propagates query error", testGetUserByIDPropagatesError)
 }
 
+func TestNormalizeAndValidateEmail(t *testing.T) {
+	t.Run("accepts valid emails", testNormalizeAndValidateEmailValidInputs)
+	t.Run("rejects invalid emails", testNormalizeAndValidateEmailInvalidInputs)
+}
+
 func testUserSignUp(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{})
 	ctx := context.Background()
@@ -493,6 +498,85 @@ func testGetUserByIDPropagatesError(t *testing.T) {
 	_, err := userService.GetUserByID(ctx, 42)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("got error %v, want %v", err, wantErr)
+	}
+}
+
+func testNormalizeAndValidateEmailValidInputs(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple address",
+			input:    "user@example.com",
+			expected: "user@example.com",
+		},
+		{
+			name:     "trims surrounding whitespace",
+			input:    "  user@example.com  ",
+			expected: "user@example.com",
+		},
+		{
+			name:     "normalizes uppercase domain",
+			input:    "user@Example.COM",
+			expected: "user@example.com",
+		},
+		{
+			name:     "keeps local part casing",
+			input:    "User.Name@Example.COM",
+			expected: "User.Name@example.com",
+		},
+		{
+			name:     "allows plus addressing",
+			input:    "user+tag@example.com",
+			expected: "user+tag@example.com",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, normalized := normalizeAndValidateEmail(tc.input)
+			if !ok {
+				t.Fatalf("normalizeAndValidateEmail(%q) returned ok=false, want ok=true", tc.input)
+			}
+
+			if normalized != tc.expected {
+				t.Fatalf("normalizeAndValidateEmail(%q) returned %q, want %q", tc.input, normalized, tc.expected)
+			}
+		})
+	}
+}
+
+func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
+	testCases := []string{
+		"",
+		"   ",
+		"null",
+		"user",
+		"user@localhost",
+		"user@example",
+		"user@.example.com",
+		"user@example.com.",
+		"user@@example.com",
+		"user@",
+		"@example.com",
+		"User <user@example.com>",
+		"user example.com",
+		strings.Repeat("a", 255),
+	}
+
+	for _, input := range testCases {
+		t.Run(input, func(t *testing.T) {
+			ok, normalized := normalizeAndValidateEmail(input)
+			if ok {
+				t.Fatalf("normalizeAndValidateEmail(%q) returned ok=true and %q, want ok=false", input, normalized)
+			}
+
+			if normalized != "" {
+				t.Fatalf("normalizeAndValidateEmail(%q) returned %q, want empty string", input, normalized)
+			}
+		})
 	}
 }
 

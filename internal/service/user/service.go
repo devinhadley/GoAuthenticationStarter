@@ -4,11 +4,12 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/mail"
 	"strings"
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/utils"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -26,6 +27,7 @@ var (
 	ErrPasswordShort      = errors.New("password cannot be empty")
 	ErrPasswordLong       = errors.New("password cannot be empty")
 	ErrPasswordCommon     = errors.New("password is too common")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 type UserQueries interface {
@@ -59,7 +61,7 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (db.User, 
 		return db.User{}, err
 	}
 
-	ok, email = utils.NormalizeAndValidateEmail(email)
+	ok, email = normalizeAndValidateEmail(email)
 	if !ok {
 		return db.User{}, ErrInvalidEmail
 	}
@@ -68,7 +70,7 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (db.User, 
 
 	passwordHash, err := argon.HashEncoded([]byte(input.Password))
 	if err != nil {
-		return db.User{}, err
+		return db.User{}, fmt.Errorf("when hashing password: %w", err)
 	}
 
 	user, err := s.queries.CreateUser(ctx, db.CreateUserParams{
@@ -99,7 +101,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 		return db.User{}, ErrInvalidLogInInput
 	}
 
-	ok, email = utils.NormalizeAndValidateEmail(email)
+	ok, email = normalizeAndValidateEmail(email)
 	if !ok {
 		return db.User{}, ErrInvalidEmail
 	}
@@ -109,7 +111,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.User{}, ErrInvalidCredentials
 		}
-		return db.User{}, err
+		return db.User{}, fmt.Errorf("getting user by email: %w", err)
 	}
 
 	if !user.IsActive {
@@ -118,7 +120,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 
 	ok, err = argon2.VerifyEncoded([]byte(input.Password), []byte(user.PasswordHash))
 	if err != nil {
-		return db.User{}, err
+		return db.User{}, fmt.Errorf("validating password hash: %w", err)
 	}
 	if !ok {
 		return db.User{}, ErrInvalidCredentials
@@ -128,7 +130,17 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (db.User, error) {
-	return s.queries.GetUserByID(ctx, id)
+	user, err := s.queries.GetUserByID(ctx, id)
+	if err != nil {
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.User{}, ErrUserNotFound
+		}
+
+		return db.User{}, fmt.Errorf("getting user by id: %w", err)
+
+	}
+	return user, nil
 }
 
 func trimAndRequireValue(value string) (string, bool) {
@@ -158,4 +170,41 @@ func (s *Service) isValidPassword(password string) error {
 	}
 
 	return nil
+}
+
+func normalizeAndValidateEmail(input string) (bool, string) {
+	email := strings.TrimSpace(input)
+
+	if email == "" || len(email) > 254 {
+		return false, ""
+	}
+
+	addr, err := mail.ParseAddress(email)
+	if err != nil {
+		return false, ""
+	}
+	if addr.Address != email {
+		return false, ""
+	}
+
+	if strings.Count(email, "@") != 1 {
+		return false, ""
+	}
+
+	parts := strings.Split(email, "@")
+	local := parts[0]
+	domain := parts[1]
+
+	if local == "" || domain == "" {
+		return false, ""
+	}
+	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false, ""
+	}
+	if !strings.Contains(domain, ".") {
+		return false, ""
+	}
+
+	normalized := local + "@" + strings.ToLower(domain)
+	return true, normalized
 }
