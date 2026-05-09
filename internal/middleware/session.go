@@ -37,9 +37,6 @@ func UserFromContext(ctx context.Context) (db.User, error) {
 	return getUser()
 }
 
-// TODO: Add context to errors!
-// I.e. retrieve session cookie: %v
-
 // CreateSessionMiddleware creates an http handler which uses the id (session id) cookie to expire sessions, rotate sessions, and authenticate the user.
 func CreateSessionMiddleware(userService *user.Service, sessionService *session.Service, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

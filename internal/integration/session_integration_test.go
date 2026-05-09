@@ -19,24 +19,27 @@ import (
 )
 
 func TestSessionMiddlewareCanAuthenticateIntegration(t *testing.T) {
-	t.Run("valid session makes it so user can be accessed in handler", testValidSessionAuthenticatesCorrectUser)
-	t.Run("no session cookie continues to next handler unauthenticated", testNoSessionCookieContinuesUnauthenticated)
-	t.Run("malformed base64 session cookie continues unauthenticated", testMalformedSessionCookieContinuesUnauthenticated)
-	t.Run("well-formed session id not found continues unauthenticated", testSessionIDNotFoundContinuesUnauthenticated)
+	t.Run("a cookie with a valid session can be used to authenticate", testValidSessionAuthenticatesCorrectUser)
+	t.Run("a cookie with no session is not authenticated", testNoSessionCookieContinuesUnauthenticated)
+	t.Run("a cookie with malformed session id is not authenticated", testMalformedSessionCookieContinuesUnauthenticated)
+	t.Run("a cookie with valid format, but non-existant session id is not authenticated", testSessionIDNotFoundContinuesUnauthenticated)
 }
 
 func TestExpiredSessionIntegration(t *testing.T) {
-	t.Run("absolute expired session does not authenticate and deactivates session", testAbsoluteExpiration)
-	t.Run("idle expired session does not authenticate and deactivates session", testIdleExpiration)
+	t.Run("an absolutely expired session is deactivated and user not authenticated", testAbsoluteExpiration)
+	t.Run("an idle expired session is deactivated and user not authenticated", testIdleExpiration)
 }
 
 func TestRotateSessionIntegration(t *testing.T) {
 	t.Run("session outside rotation threshold rotates and sets new cookie", testSessionRotation)
 }
 
+func TestCreateSessionIntegration(t *testing.T) {
+	t.Run("creating eleventh session deactivates only least recently used session", testCreateSessionDeactivatesOnlyLeastRecentlyUsedSessionWhenLimitExceeded)
+}
+
 func TestUpdateLastSeenIntegration(t *testing.T) {
-	t.Run("update last seen is skipped when threshold not reached", needsImplemented)
-	t.Run("update last seen succeeds when threshold reached", needsImplemented)
+	t.Run("update last seen succeeds when threshold reached", testUpdateLastSeenWhenThresholdReached)
 }
 
 func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
@@ -85,10 +88,20 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 		t.Fatalf("expected status ok, got %v", res.Code)
 	}
 
-	// Ensure session ID remains the same...
-	_, err = deps.sessionService.GetSession(ctx, createdSession.DBSession().ID)
+	sessionAfterRequest, err := deps.sessionService.GetSession(ctx, createdSession.DBSession().ID)
 	if err != nil {
 		t.Fatalf("error when ensuring session still exists with same id %v", err)
+	}
+
+	// Ensure session ID and last seen remain the same...
+	// I.e. no rotation and no last-seen update needed.
+	if !bytes.Equal(sessionAfterRequest.DBSession().ID, createdSession.DBSession().ID) {
+		t.Fatalf("expected session id to remain %v, got %v", createdSession.DBSession().ID, sessionAfterRequest.DBSession().ID)
+	}
+
+	// Ensure last seen at was not updated as it was within threshold...
+	if !sessionAfterRequest.DBSession().LastSeenAt.Time.Equal(createdSession.DBSession().LastSeenAt.Time) {
+		t.Fatalf("expected last seen to remain %v, got %v", createdSession.DBSession().LastSeenAt.Time, sessionAfterRequest.DBSession().LastSeenAt.Time)
 	}
 }
 
@@ -240,7 +253,7 @@ func testAbsoluteExpiration(t *testing.T) {
 		t.Fatalf("wanted response status code %v, got %v", http.StatusOK, rec.Result().StatusCode)
 	}
 
-	assertSessionExpired(t, deps, session.DBSession().ID)
+	assertSessionActiveState(t, deps, session.DBSession().ID, false)
 
 	foundClearedCookie := false
 	for _, cookie := range rec.Result().Cookies() {
@@ -305,7 +318,7 @@ func testIdleExpiration(t *testing.T) {
 		t.Fatalf("wanted response status code %v, got %v", http.StatusOK, rec.Result().StatusCode)
 	}
 
-	assertSessionExpired(t, deps, session.DBSession().ID)
+	assertSessionActiveState(t, deps, session.DBSession().ID, false)
 
 	foundClearedCookie := false
 	for _, cookie := range rec.Result().Cookies() {
@@ -385,7 +398,7 @@ func testSessionRotation(t *testing.T) {
 		t.Fatal("expected middleware to set rotated session cookie")
 	}
 
-	newSession, err := deps.sessionService.GetSession(ctx, rotatedSessionID)
+	sessionAfterRotation, err := deps.sessionService.GetSession(ctx, rotatedSessionID)
 	if err != nil {
 		t.Fatalf("failed to get rotated session %v", err)
 	}
@@ -395,12 +408,123 @@ func testSessionRotation(t *testing.T) {
 		t.Fatalf("expected old session id to be missing with %v but got %v", session.ErrSessionNotFound, err)
 	}
 
-	if bytes.Equal(newSession.DBSession().ID, createdSession.DBSession().ID) {
-		t.Fatalf("session id didn't change: %v", newSession.DBSession().ID)
+	if bytes.Equal(sessionAfterRotation.DBSession().ID, createdSession.DBSession().ID) {
+		t.Fatalf("session id didn't change: %v", sessionAfterRotation.DBSession().ID)
 	}
 
-	if !newSession.DBSession().LastRefreshedAt.Time.After(createdSession.DBSession().LastRefreshedAt.Time) {
-		t.Fatalf("wanted last refresh date: %v to be later after update but got %v", createdSession.DBSession().LastRefreshedAt.Time, newSession.DBSession().LastRefreshedAt.Time)
+	if !sessionAfterRotation.DBSession().LastRefreshedAt.Time.After(createdSession.DBSession().LastRefreshedAt.Time) {
+		t.Fatalf("wanted last refresh date: %v to be later after update but got %v", createdSession.DBSession().LastRefreshedAt.Time, sessionAfterRotation.DBSession().LastRefreshedAt.Time)
+	}
+}
+
+func testCreateSessionDeactivatesOnlyLeastRecentlyUsedSessionWhenLimitExceeded(t *testing.T) {
+	deps := getTestDependencies(t)
+	ctx := context.Background()
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    "test@example.com",
+		Password: "a-password-!-9999",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user %v", err)
+	}
+
+	sessions := make([]session.Session, 0, 10)
+	for range 10 {
+		createdSession, createErr := deps.sessionService.CreateSession(ctx, createdUser)
+		if createErr != nil {
+			t.Fatalf("failed to create test session %v", createErr)
+		}
+
+		sessions = append(sessions, createdSession)
+	}
+
+	makeSessionLastSeenEarlier(t, deps, sessions[0].DBSession().ID)
+
+	eleventhSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create eleventh session %v", err)
+	}
+
+	assertSessionActiveState(t, deps, sessions[0].DBSession().ID, false)
+
+	_, err = deps.sessionService.GetSession(ctx, sessions[0].DBSession().ID)
+	if !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("wanted error %v for deactivated session, got %v", session.ErrSessionNotFound, err)
+	}
+
+	for i := 1; i < len(sessions); i++ {
+		assertSessionActiveState(t, deps, sessions[i].DBSession().ID, true)
+	}
+
+	assertSessionActiveState(t, deps, eleventhSession.DBSession().ID, true)
+}
+
+func testUpdateLastSeenWhenThresholdReached(t *testing.T) {
+	deps := getTestDependencies(t)
+	ctx := context.Background()
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    "test@example.com",
+		Password: "a-password-!-9999",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user %v", err)
+	}
+
+	createdSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create test session %v", err)
+	}
+
+	makeSessionLastSeenEarlier(t, deps, createdSession.DBSession().ID)
+
+	createdSession, err = deps.sessionService.GetSession(ctx, createdSession.DBSession().ID)
+	if err != nil {
+		t.Fatalf("failed to fetch aged session %v", err)
+	}
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		currentUser, userErr := middleware.UserFromContext(r.Context())
+		if userErr != nil {
+			t.Fatalf("failed to get user from context %v", userErr)
+		}
+
+		if currentUser.ID != createdUser.ID {
+			t.Fatalf("expected user from context to have id %v, got %v", createdUser.ID, currentUser.ID)
+		}
+
+		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+	}
+
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(createdSession.DBSession().ID),
+		Expires:  createdSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status ok, got %v", res.Code)
+	}
+
+	sessionAfterRequest, err := deps.sessionService.GetSession(ctx, createdSession.DBSession().ID)
+	if err != nil {
+		t.Fatalf("error when ensuring session still exists with same id %v", err)
+	}
+
+	if !bytes.Equal(sessionAfterRequest.DBSession().ID, createdSession.DBSession().ID) {
+		t.Fatalf("expected session id to remain %v, got %v", createdSession.DBSession().ID, sessionAfterRequest.DBSession().ID)
+	}
+
+	if !sessionAfterRequest.DBSession().LastSeenAt.Time.After(createdSession.DBSession().LastSeenAt.Time) {
+		t.Fatalf("expected last seen to be updated after %v, got %v", createdSession.DBSession().LastSeenAt.Time, sessionAfterRequest.DBSession().LastSeenAt.Time)
 	}
 }
 
@@ -470,7 +594,28 @@ func makeSessionNeedRefresh(t *testing.T, deps sessionIntegrationTestDependencie
 	}
 }
 
-func assertSessionExpired(t *testing.T, deps sessionIntegrationTestDependencies, sessionId []byte) {
+func makeSessionLastSeenEarlier(t *testing.T, deps sessionIntegrationTestDependencies, sessionId []byte) {
+	t.Helper()
+
+	aFewDaysEarlier := time.Now().AddDate(0, 0, -5)
+	query := `
+	UPDATE sessions
+	SET created_at = $2,
+	    last_seen_at = $2
+	WHERE id = $1;
+	`
+
+	tag, err := deps.pool.Exec(context.Background(), query, sessionId, aFewDaysEarlier)
+	if err != nil {
+		t.Fatalf("error when making session last seen earlier: %v", err)
+	}
+
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("wanted 1 row affected when idling session, got %d", tag.RowsAffected())
+	}
+}
+
+func assertSessionActiveState(t *testing.T, deps sessionIntegrationTestDependencies, sessionId []byte, expectedIsActive bool) {
 	t.Helper()
 
 	query := `
@@ -483,11 +628,11 @@ func assertSessionExpired(t *testing.T, deps sessionIntegrationTestDependencies,
 	var isActive bool
 	err := row.Scan(&isActive)
 	if err != nil {
-		t.Fatalf("failed to get session is_active when asserting expired %v", err)
+		t.Fatalf("failed to get session is_active when asserting state %v", err)
 	}
 
-	if isActive {
-		t.Fatalf("wanted session is_active %v, got %v", false, isActive)
+	if isActive != expectedIsActive {
+		t.Fatalf("wanted session is_active %v, got %v", expectedIsActive, isActive)
 	}
 }
 
