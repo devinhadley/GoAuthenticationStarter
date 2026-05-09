@@ -85,7 +85,7 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (db.User, 
 			}
 		}
 
-		return db.User{}, err
+		return db.User{}, fmt.Errorf("creating user: %w", err)
 	}
 
 	return user, nil
