@@ -31,7 +31,7 @@ func main() {
 	sessionService := session.NewService(queries)
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
-	mux.Handle("POST /login", handlers.CreateSignUpHandler(userService, sessionService))
+	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))
 
 	http.ListenAndServe(":8080", mux)
 }
