@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// TODO: Set last refreshed at to now when rotating session!
 type SessionQueries interface {
 	CreateSession(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
 	DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error
@@ -46,8 +45,6 @@ func (s *Service) CreateSession(ctx context.Context, user db.User) (Session, err
 		return Session{}, fmt.Errorf("getting session count: %w", err)
 	}
 
-	// TODO: Test this behavior especially in integration.
-	// Limit number of active user sessions.
 	if numSessions >= MaxNumberOfActiveSessions {
 		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, user.ID)
 		if err != nil {

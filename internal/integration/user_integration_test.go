@@ -53,7 +53,6 @@ func TestLogInIntegration(t *testing.T) {
 	t.Run("login rejects invalid email", testLogInRejectsInvalidEmail)
 	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
 	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
-	t.Run("log in deletes oldest session if more than 10", func(t *testing.T) { t.Skip("needs implemented!") })
 }
 
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
