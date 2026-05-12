@@ -51,12 +51,13 @@ func TestLogInIntegration(t *testing.T) {
 
 	// TODO: Assert auth_attempts contains one succeeded login attempt on successful login.
 	t.Run("login succeeds with valid credentials and creates session", testSuccessfulLogin)
-	t.Run("login rejects invalid email", testLogInRejectsInvalidEmail)
 	// TODO: Assert auth_attempts contains one failed login attempt and no session when user does not exist.
 	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
 	// TODO: Assert auth_attempts contains one failed login attempt and no session when password is incorrect.
 	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
-	// TODO: Add integration coverage for login rate limiting after repeated failed attempts.
+	t.Run("returns 429 when rate limited and doesnt create session / auth attempt", testLogInReturnsTooManyRequestsWhenRateLimited)
+	// TODO: assert no auth attempt
+	t.Run("test rejects invalid email", testLogInRejectsInvalidEmail)
 }
 
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
@@ -374,6 +375,70 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 
 	if count != 0 {
 		t.Fatalf("got number of sessions for user %v wanted %v", count, 0)
+	}
+}
+
+func testLogInReturnsTooManyRequestsWhenRateLimited(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+	email := "rate-limited@example.com"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: "example-password",
+	})
+	if err != nil {
+		t.Fatalf("failed to seed user: %v", err)
+	}
+
+	for range 10 {
+		err = deps.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+			Action:  db.AuthActionLogin,
+			Email:   email,
+			Outcome: db.AuthOutcomeFailed,
+		})
+		if err != nil {
+			t.Fatalf("failed to seed failed auth attempt: %v", err)
+		}
+	}
+
+	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+		"email":    email,
+		"password": "example-password",
+	})
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "try again later" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
+	}
+
+	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.ID)
+	if err != nil {
+		t.Fatalf("got error %v when getting session count", err)
+	}
+
+	if count != 0 {
+		t.Fatalf("got number of sessions for user %v wanted %v", count, 0)
+	}
+
+	var attemptsAfter int
+	err = deps.pool.QueryRow(ctx, "SELECT COUNT(*) FROM auth_attempts WHERE email = $1", email).Scan(&attemptsAfter)
+	if err != nil {
+		t.Fatalf("failed to count auth attempts after login request: %v", err)
+	}
+
+	if attemptsAfter != 10 {
+		t.Fatalf("got %d auth attempts after rate limited login, want %d", attemptsAfter, 10)
+	}
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			t.Fatal("expected response to not include session cookie id")
+		}
 	}
 }
 

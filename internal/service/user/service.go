@@ -34,8 +34,8 @@ var (
 )
 
 const (
-	RateLimitLoginDurationMinutes = 10
-	RateLimitLoginAttemptsAllowed = 10
+	rateLimitLoginDurationMinutes = 10
+	rateLimitLoginAttemptsAllowed = 10
 )
 
 type UserQueries interface {
@@ -209,7 +209,7 @@ func (s *Service) isValidPassword(password string) error {
 }
 
 func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, error) {
-	timeBefore := time.Now().Add(-(RateLimitLoginDurationMinutes * time.Minute))
+	timeBefore := time.Now().Add(-(rateLimitLoginDurationMinutes * time.Minute))
 
 	loginAttemptsForEmail, err := s.queries.CountFailedAuthAttemptsSince(ctx, db.CountFailedAuthAttemptsSinceParams{
 		Action: db.AuthActionLogin,
@@ -223,7 +223,7 @@ func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, e
 		return false, err
 	}
 
-	return loginAttemptsForEmail >= RateLimitLoginAttemptsAllowed, nil
+	return loginAttemptsForEmail >= rateLimitLoginAttemptsAllowed, nil
 }
 
 func (s *Service) createLoginAttempt(ctx context.Context, email string, outcome db.AuthOutcome) error {
