@@ -49,14 +49,10 @@ func TestLogInIntegration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
-	// TODO: Assert auth_attempts contains one succeeded login attempt on successful login.
 	t.Run("login succeeds with valid credentials and creates session", testSuccessfulLogin)
-	// TODO: Assert auth_attempts contains one failed login attempt and no session when user does not exist.
 	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
-	// TODO: Assert auth_attempts contains one failed login attempt and no session when password is incorrect.
 	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
 	t.Run("returns 429 when rate limited and doesnt create session / auth attempt", testLogInReturnsTooManyRequestsWhenRateLimited)
-	// TODO: assert no auth attempt
 	t.Run("test rejects invalid email", testLogInRejectsInvalidEmail)
 }
 
@@ -275,9 +271,11 @@ func testSignUpRejectsInvalidEmail(t *testing.T) {
 
 func testSuccessfulLogin(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+	email := "test@example.com"
 
-	user, err := deps.userService.SignUp(context.Background(), user.AuthenticateBody{
-		Email:    "test@example.com",
+	user, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
 		Password: "example-password",
 	})
 	if err != nil {
@@ -285,7 +283,7 @@ func testSuccessfulLogin(t *testing.T) {
 	}
 
 	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
-		"email":    "test@example.com",
+		"email":    email,
 		"password": "example-password",
 	})
 
@@ -294,7 +292,7 @@ func testSuccessfulLogin(t *testing.T) {
 	}
 
 	// Session created for the user.
-	count, err := deps.queries.GetSessionCountByUser(context.Background(), user.ID)
+	count, err := deps.queries.GetSessionCountByUser(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("got error %v when getting session count", err)
 	}
@@ -303,14 +301,25 @@ func testSuccessfulLogin(t *testing.T) {
 		t.Fatalf("got number of sessions for user %v wanted %v", count, 1)
 	}
 
+	succeededCount := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeSucceeded)
+	if succeededCount != 1 {
+		t.Fatalf("got %d successful auth attempts for user %q, want %d", succeededCount, email, 1)
+	}
+
+	failedCount := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeFailed)
+	if failedCount != 0 {
+		t.Fatalf("got %d failed auth attempts for user %q, want %d", failedCount, email, 0)
+	}
+
 	assertSessionCookieExists(t, rec)
 }
 
 func testLogInRejectsInvalidEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
+	email := "invalid"
 
 	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
-		"email":    "invalid",
+		"email":    email,
 		"password": "example-password",
 	})
 
@@ -322,13 +331,21 @@ func testLogInRejectsInvalidEmail(t *testing.T) {
 	if gotErr.Email != "email is not valid" {
 		t.Fatalf("got email error %q, want %q", gotErr.Email, "email is not valid")
 	}
+
+	attemptCount := countAuthAttemptsByEmail(t, deps.pool, email)
+	if attemptCount != 0 {
+		t.Fatalf("got %d auth attempts for user %q, want %d", attemptCount, email, 0)
+	}
+
+	assertNoSessionCookie(t, rec)
 }
 
 func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
+	email := "missing@example.com"
 
 	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
-		"email":    "missing@example.com",
+		"email":    email,
 		"password": "example-password",
 	})
 
@@ -340,13 +357,27 @@ func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 	if gotErr.Error != "authentication failed" {
 		t.Fatalf("got error %q, want %q", gotErr.Error, "authentication failed")
 	}
+
+	attemptCount := countAuthAttemptsByEmail(t, deps.pool, email)
+	if attemptCount != 1 {
+		t.Fatalf("got %d auth attempts for user %q, want %d", attemptCount, email, 1)
+	}
+
+	failedCount := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeFailed)
+	if failedCount != 1 {
+		t.Fatalf("got %d failed auth attempts for user %q, want %d", failedCount, email, 1)
+	}
+
+	assertNoSessionCookie(t, rec)
 }
 
 func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+	email := "wrong-password@example.com"
 
-	user, err := deps.userService.SignUp(context.Background(), user.AuthenticateBody{
-		Email:    "wrong-password@example.com",
+	user, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
 		Password: "correct-password",
 	})
 	if err != nil {
@@ -354,7 +385,7 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 	}
 
 	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
-		"email":    "wrong-password@example.com",
+		"email":    email,
 		"password": "incorrect-password",
 	})
 
@@ -368,7 +399,7 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 	}
 
 	// Session not created for the user.
-	count, err := deps.queries.GetSessionCountByUser(context.Background(), user.ID)
+	count, err := deps.queries.GetSessionCountByUser(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("got error %v when getting session count", err)
 	}
@@ -376,6 +407,18 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("got number of sessions for user %v wanted %v", count, 0)
 	}
+
+	failedCount := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeFailed)
+	if failedCount != 1 {
+		t.Fatalf("got %d failed auth attempts for user %q, want %d", failedCount, email, 1)
+	}
+
+	succeededCount := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeSucceeded)
+	if succeededCount != 0 {
+		t.Fatalf("got %d successful auth attempts for user %q, want %d", succeededCount, email, 0)
+	}
+
+	assertNoSessionCookie(t, rec)
 }
 
 func testLogInReturnsTooManyRequestsWhenRateLimited(t *testing.T) {
@@ -500,6 +543,16 @@ func assertSessionCookieExists(t *testing.T, rec *httptest.ResponseRecorder) {
 	t.Fatal("expected response to include session cookie id")
 }
 
+func assertNoSessionCookie(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			t.Fatal("expected response to not include session cookie id")
+		}
+	}
+}
+
 func assertNoUserWithEmail(t *testing.T, queries *db.Queries, email string) {
 	t.Helper()
 
@@ -528,6 +581,30 @@ func countUsers(t *testing.T, pool *pgxpool.Pool) int {
 	err := pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM users").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to count users: %v", err)
+	}
+
+	return count
+}
+
+func countAuthAttemptsByEmail(t *testing.T, pool *pgxpool.Pool, email string) int {
+	t.Helper()
+
+	var count int
+	err := pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM auth_attempts WHERE email = $1", email).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count auth attempts for email %q: %v", email, err)
+	}
+
+	return count
+}
+
+func countAuthAttemptsByEmailAndOutcome(t *testing.T, pool *pgxpool.Pool, email string, outcome db.AuthOutcome) int {
+	t.Helper()
+
+	var count int
+	err := pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM auth_attempts WHERE email = $1 AND outcome = $2", email, outcome).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count auth attempts for email %q and outcome %q: %v", email, outcome, err)
 	}
 
 	return count
