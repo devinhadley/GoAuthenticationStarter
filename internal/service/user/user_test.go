@@ -32,6 +32,8 @@ func TestLogIn(t *testing.T) {
 	t.Run("log in rejects invalid email", testUserLogInRejectsInvalidEmail)
 	t.Run("log in returns invalid credentials when user does not exist", testUserLogInUserNotFound)
 	t.Run("log in returns invalid credentials for wrong password", testUserLogInWrongPassword)
+	t.Run("log in is rate limited after 10 failed attempts within 10 minutes", testUserLogInRateLimited)
+	t.Run("log in is not rate limited when attempts are below the threshold", testUserLogInNotRateLimited)
 	t.Run("log in propagates unexpected query error", testUserLogInPropagatesUnexpectedError)
 	t.Run("logging in fails with inactive user", testLogInWhenUserInactive)
 }
@@ -228,6 +230,14 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 	if user.Email != expectedEmail {
 		t.Fatalf("got email %q, want %q", user.Email, expectedEmail)
 	}
+}
+
+func testUserLogInRateLimited(t *testing.T) {
+	t.Skip("needs implemented!")
+}
+
+func testUserLogInNotRateLimited(t *testing.T) {
+	t.Skip("needs implemented!")
 }
 
 func testUserSignUpEmailTaken(t *testing.T) {
@@ -536,7 +546,7 @@ func testNormalizeAndValidateEmailValidInputs(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ok, normalized := normalizeAndValidateEmail(tc.input)
+			normalized, ok := normalizeAndValidateEmail(tc.input)
 			if !ok {
 				t.Fatalf("normalizeAndValidateEmail(%q) returned ok=false, want ok=true", tc.input)
 			}
@@ -568,7 +578,7 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 
 	for _, input := range testCases {
 		t.Run(input, func(t *testing.T) {
-			ok, normalized := normalizeAndValidateEmail(input)
+			normalized, ok := normalizeAndValidateEmail(input)
 			if ok {
 				t.Fatalf("normalizeAndValidateEmail(%q) returned ok=true and %q, want ok=false", input, normalized)
 			}

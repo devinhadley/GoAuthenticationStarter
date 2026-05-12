@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/matthewhartstonge/argon2"
 )
 
@@ -28,12 +30,19 @@ var (
 	ErrPasswordLong       = errors.New("password cannot be empty")
 	ErrPasswordCommon     = errors.New("password is too common")
 	ErrUserNotFound       = errors.New("user not found")
+	ErrLoginRateLimit     = errors.New("too many login attempts for email")
+)
+
+const (
+	RateLimitLoginDurationMinutes = 10
+	RateLimitLoginAttemptsAllowed = 10
 )
 
 type UserQueries interface {
 	CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error)
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
 	GetUserByID(ctx context.Context, id int64) (db.User, error)
+	CountFailedAuthAttemptsSince(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
 }
 
 type Service struct {
@@ -61,7 +70,7 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (db.User, 
 		return db.User{}, err
 	}
 
-	ok, email = normalizeAndValidateEmail(email)
+	email, ok = normalizeAndValidateEmail(email)
 	if !ok {
 		return db.User{}, ErrInvalidEmail
 	}
@@ -101,9 +110,18 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 		return db.User{}, ErrInvalidLogInInput
 	}
 
-	ok, email = normalizeAndValidateEmail(email)
+	email, ok = normalizeAndValidateEmail(email)
 	if !ok {
 		return db.User{}, ErrInvalidEmail
+	}
+
+	isLimited, err := s.isLoginRateLimited(ctx, email)
+	if err != nil {
+		return db.User{}, fmt.Errorf("checking if email ratelimited: %w", err)
+	}
+
+	if isLimited {
+		return db.User{}, ErrLoginRateLimit
 	}
 
 	user, err := s.queries.GetUserByEmail(ctx, email)
@@ -172,23 +190,44 @@ func (s *Service) isValidPassword(password string) error {
 	return nil
 }
 
-func normalizeAndValidateEmail(input string) (bool, string) {
+func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, error) {
+	timeBefore := time.Now().Add(-(RateLimitLoginDurationMinutes * time.Minute))
+
+	loginAttemptsForEmail, err := s.queries.CountFailedAuthAttemptsSince(ctx, db.CountFailedAuthAttemptsSinceParams{
+		Action: db.AuthActionLogin,
+		Email:  email,
+		CreatedAt: pgtype.Timestamptz{
+			Time:  timeBefore,
+			Valid: true,
+		},
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return loginAttemptsForEmail >= RateLimitLoginAttemptsAllowed, nil
+}
+
+func (s *Service) createLoginAttempt() {
+}
+
+func normalizeAndValidateEmail(input string) (string, bool) {
 	email := strings.TrimSpace(input)
 
 	if email == "" || len(email) > 254 {
-		return false, ""
+		return "", false
 	}
 
 	addr, err := mail.ParseAddress(email)
 	if err != nil {
-		return false, ""
+		return "", false
 	}
 	if addr.Address != email {
-		return false, ""
+		return "", false
 	}
 
 	if strings.Count(email, "@") != 1 {
-		return false, ""
+		return "", false
 	}
 
 	parts := strings.Split(email, "@")
@@ -196,15 +235,15 @@ func normalizeAndValidateEmail(input string) (bool, string) {
 	domain := parts[1]
 
 	if local == "" || domain == "" {
-		return false, ""
+		return "", false
 	}
 	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
-		return false, ""
+		return "", false
 	}
 	if !strings.Contains(domain, ".") {
-		return false, ""
+		return "", false
 	}
 
 	normalized := local + "@" + strings.ToLower(domain)
-	return true, normalized
+	return normalized, true
 }
