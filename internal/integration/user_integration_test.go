@@ -49,10 +49,14 @@ func TestLogInIntegration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
+	// TODO: Assert auth_attempts contains one succeeded login attempt on successful login.
 	t.Run("login succeeds with valid credentials and creates session", testSuccessfulLogin)
 	t.Run("login rejects invalid email", testLogInRejectsInvalidEmail)
+	// TODO: Assert auth_attempts contains one failed login attempt and no session when user does not exist.
 	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
+	// TODO: Assert auth_attempts contains one failed login attempt and no session when password is incorrect.
 	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
+	// TODO: Add integration coverage for login rate limiting after repeated failed attempts.
 }
 
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {

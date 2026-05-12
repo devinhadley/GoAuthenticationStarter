@@ -13,6 +13,7 @@ type MockUserQueries struct {
 	GetUserByEmailFn               func(ctx context.Context, email string) (db.User, error)
 	GetUserByIDFn                  func(ctx context.Context, id int64) (db.User, error)
 	CountFailedAuthAttemptsSinceFn func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
+	CreateLoginAuthAttemptFn       func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
 }
 
 func (q *MockUserQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
@@ -54,6 +55,14 @@ func (q *MockUserQueries) CountFailedAuthAttemptsSince(ctx context.Context, arg 
 		return q.CountFailedAuthAttemptsSinceFn(ctx, arg)
 	}
 	return 0, nil
+}
+
+func (q *MockUserQueries) CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+	if q.CreateLoginAuthAttemptFn != nil {
+		return q.CreateLoginAuthAttemptFn(ctx, arg)
+	}
+
+	return nil
 }
 
 type MockSessionQueries struct {

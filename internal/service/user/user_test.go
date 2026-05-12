@@ -33,7 +33,6 @@ func TestLogIn(t *testing.T) {
 	t.Run("log in returns invalid credentials when user does not exist", testUserLogInUserNotFound)
 	t.Run("log in returns invalid credentials for wrong password", testUserLogInWrongPassword)
 	t.Run("log in is rate limited after 10 failed attempts within 10 minutes", testUserLogInRateLimited)
-	t.Run("log in is not rate limited when attempts are below the threshold", testUserLogInNotRateLimited)
 	t.Run("log in propagates unexpected query error", testUserLogInPropagatesUnexpectedError)
 	t.Run("logging in fails with inactive user", testLogInWhenUserInactive)
 }
@@ -232,14 +231,6 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 	}
 }
 
-func testUserLogInRateLimited(t *testing.T) {
-	t.Skip("needs implemented!")
-}
-
-func testUserLogInNotRateLimited(t *testing.T) {
-	t.Skip("needs implemented!")
-}
-
 func testUserSignUpEmailTaken(t *testing.T) {
 	ctx := context.Background()
 	userService := setupUserService(t, mocks.MockUserQueries{
@@ -287,6 +278,7 @@ func testUserLogIn(t *testing.T) {
 	id := int64(1)
 	email := "test@example.com"
 	password := "password"
+	authAttemptCreated := false
 
 	argon := argon2.MemoryConstrainedDefaults()
 	passwordHash, err := argon.HashEncoded([]byte(password))
@@ -297,6 +289,19 @@ func testUserLogIn(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			authAttemptCreated = true
+			if arg.Action != db.AuthActionLogin {
+				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionLogin)
+			}
+			if arg.Email != email {
+				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, email)
+			}
+			if arg.Outcome != db.AuthOutcomeSucceeded {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeSucceeded)
+			}
+			return nil
 		},
 	})
 
@@ -319,6 +324,10 @@ func testUserLogIn(t *testing.T) {
 	if user.PasswordHash != string(passwordHash) {
 		t.Fatalf("got password hash %v, expected %v", user.PasswordHash, passwordHash)
 	}
+
+	if !authAttemptCreated {
+		t.Fatal("expected CreateLoginAuthAttempt to be called")
+	}
 }
 
 func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
@@ -327,6 +336,10 @@ func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid log-in input")
 			return db.User{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			t.Fatalf("i should not be called")
+			return nil
 		},
 	})
 
@@ -356,6 +369,7 @@ func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
 
 func testUserLogInWrongPassword(t *testing.T) {
 	ctx := context.Background()
+	authAttemptCreated := false
 
 	argon := argon2.MemoryConstrainedDefaults()
 	passwordHash, err := argon.HashEncoded([]byte("correct-password"))
@@ -367,6 +381,13 @@ func testUserLogInWrongPassword(t *testing.T) {
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			authAttemptCreated = true
+			if arg.Outcome != db.AuthOutcomeFailed {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeFailed)
+			}
+			return nil
+		},
 	})
 
 	_, err = userService.LogIn(ctx, AuthenticateBody{
@@ -377,6 +398,10 @@ func testUserLogInWrongPassword(t *testing.T) {
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("got error %v, want %v", err, ErrInvalidCredentials)
 	}
+
+	if !authAttemptCreated {
+		t.Fatal("expected CreateLoginAuthAttempt to be called")
+	}
 }
 
 func testUserLogInRejectsInvalidEmail(t *testing.T) {
@@ -385,6 +410,10 @@ func testUserLogInRejectsInvalidEmail(t *testing.T) {
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid email")
 			return db.User{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("i should not be called")
+			return nil
 		},
 	})
 
@@ -400,9 +429,17 @@ func testUserLogInRejectsInvalidEmail(t *testing.T) {
 
 func testUserLogInUserNotFound(t *testing.T) {
 	ctx := context.Background()
+	authAttemptCreated := false
 	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, pgx.ErrNoRows
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			authAttemptCreated = true
+			if arg.Outcome != db.AuthOutcomeFailed {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeFailed)
+			}
+			return nil
 		},
 	})
 
@@ -414,6 +451,10 @@ func testUserLogInUserNotFound(t *testing.T) {
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("got error %v, want %v", err, ErrInvalidCredentials)
 	}
+
+	if !authAttemptCreated {
+		t.Fatal("expected CreateLoginAuthAttempt to be called")
+	}
 }
 
 func testUserLogInPropagatesUnexpectedError(t *testing.T) {
@@ -423,6 +464,10 @@ func testUserLogInPropagatesUnexpectedError(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, expectedErr
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			t.Fatalf("i should not be called")
+			return nil
 		},
 	})
 
@@ -439,6 +484,7 @@ func testUserLogInPropagatesUnexpectedError(t *testing.T) {
 func testLogInWhenUserInactive(t *testing.T) {
 	id := int64(1)
 	password := "password"
+	authAttemptCreated := false
 
 	argon := argon2.MemoryConstrainedDefaults()
 	passwordHash, err := argon.HashEncoded([]byte(password))
@@ -449,6 +495,13 @@ func testLogInWhenUserInactive(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: false}, nil
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			authAttemptCreated = true
+			if arg.Outcome != db.AuthOutcomeFailed {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeFailed)
+			}
+			return nil
 		},
 	})
 
@@ -463,6 +516,36 @@ func testLogInWhenUserInactive(t *testing.T) {
 
 	if usr != (db.User{}) {
 		t.Fatalf("wanted user %v but got %v", db.User{}, usr)
+	}
+
+	if !authAttemptCreated {
+		t.Fatal("expected CreateLoginAuthAttempt to be called")
+	}
+}
+
+func testUserLogInRateLimited(t *testing.T) {
+	ctx := context.Background()
+	userService := setupUserService(t, mocks.MockUserQueries{
+		CountFailedAuthAttemptsSinceFn: func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error) {
+			return RateLimitLoginAttemptsAllowed, nil
+		},
+		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
+			t.Fatal("GetUserByEmail should not be called for rate limited login")
+			return db.User{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited login")
+			return nil
+		},
+	})
+
+	_, err := userService.LogIn(ctx, AuthenticateBody{
+		Email:    "test@example.com",
+		Password: "example-password",
+	})
+
+	if !errors.Is(err, ErrLoginRateLimit) {
+		t.Fatalf("got error %v, want %v", err, ErrLoginRateLimit)
 	}
 }
 
