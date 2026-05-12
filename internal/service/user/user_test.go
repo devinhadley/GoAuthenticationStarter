@@ -527,7 +527,7 @@ func testUserLogInRateLimited(t *testing.T) {
 	ctx := context.Background()
 	userService := setupUserService(t, mocks.MockUserQueries{
 		CountFailedAuthAttemptsSinceFn: func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error) {
-			return RateLimitLoginAttemptsAllowed, nil
+			return rateLimitLoginAttemptsAllowed, nil
 		},
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for rate limited login")
