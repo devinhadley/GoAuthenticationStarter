@@ -137,5 +137,10 @@ func writeLogInError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 
+	if errors.Is(err, user.ErrLoginRateLimit) {
+		utils.WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
+		return true
+	}
+
 	return false
 }

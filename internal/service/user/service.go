@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/mail"
 	"strings"
 	"time"
@@ -34,8 +35,8 @@ var (
 )
 
 const (
-	RateLimitLoginDurationMinutes = 10
-	RateLimitLoginAttemptsAllowed = 10
+	rateLimitLoginDurationMinutes = 10
+	rateLimitLoginAttemptsAllowed = 10
 )
 
 type UserQueries interface {
@@ -43,6 +44,7 @@ type UserQueries interface {
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
 	GetUserByID(ctx context.Context, id int64) (db.User, error)
 	CountFailedAuthAttemptsSince(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
+	CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
 }
 
 type Service struct {
@@ -127,12 +129,20 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 	user, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			err = s.createLoginAttempt(ctx, email, db.AuthOutcomeFailed)
+			if err != nil {
+				return db.User{}, err
+			}
 			return db.User{}, ErrInvalidCredentials
 		}
 		return db.User{}, fmt.Errorf("getting user by email: %w", err)
 	}
 
 	if !user.IsActive {
+		err = s.createLoginAttempt(ctx, email, db.AuthOutcomeFailed)
+		if err != nil {
+			return db.User{}, err
+		}
 		return db.User{}, ErrInvalidCredentials
 	}
 
@@ -141,7 +151,16 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 		return db.User{}, fmt.Errorf("validating password hash: %w", err)
 	}
 	if !ok {
+		err = s.createLoginAttempt(ctx, email, db.AuthOutcomeFailed)
+		if err != nil {
+			return db.User{}, err
+		}
 		return db.User{}, ErrInvalidCredentials
+	}
+
+	err = s.createLoginAttempt(ctx, email, db.AuthOutcomeSucceeded)
+	if err != nil {
+		log.Printf("creating successful auth login attempt: %v", err)
 	}
 
 	return user, nil
@@ -191,7 +210,7 @@ func (s *Service) isValidPassword(password string) error {
 }
 
 func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, error) {
-	timeBefore := time.Now().Add(-(RateLimitLoginDurationMinutes * time.Minute))
+	timeBefore := time.Now().Add(-(rateLimitLoginDurationMinutes * time.Minute))
 
 	loginAttemptsForEmail, err := s.queries.CountFailedAuthAttemptsSince(ctx, db.CountFailedAuthAttemptsSinceParams{
 		Action: db.AuthActionLogin,
@@ -205,10 +224,20 @@ func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, e
 		return false, err
 	}
 
-	return loginAttemptsForEmail >= RateLimitLoginAttemptsAllowed, nil
+	return loginAttemptsForEmail >= rateLimitLoginAttemptsAllowed, nil
 }
 
-func (s *Service) createLoginAttempt() {
+func (s *Service) createLoginAttempt(ctx context.Context, email string, outcome db.AuthOutcome) error {
+	err := s.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+		Action:  db.AuthActionLogin,
+		Email:   email,
+		Outcome: outcome,
+	})
+	if err != nil {
+		return fmt.Errorf("creating login auth attempt: %w", err)
+	}
+
+	return nil
 }
 
 func normalizeAndValidateEmail(input string) (string, bool) {
