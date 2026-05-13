@@ -4,6 +4,7 @@ CREATE TYPE auth_outcome AS ENUM ('succeeded', 'failed');
 
 -- TODO: Add a primary key column to auth_attempts (for example, id BIGSERIAL PRIMARY KEY).
 CREATE TABLE auth_attempts (
+  id BIGSERIAL PRIMARY KEY,
   action auth_action NOT NULL,
   email  TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -97,6 +97,7 @@ func (ns NullAuthOutcome) Value() (driver.Value, error) {
 }
 
 type AuthAttempt struct {
+	ID        int64
 	Action    AuthAction
 	Email     string
 	CreatedAt pgtype.Timestamptz
