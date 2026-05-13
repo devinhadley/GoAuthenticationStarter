@@ -514,8 +514,8 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 	_, err = deps.pool.Exec(ctx, `
 		UPDATE auth_attempts
 		SET created_at = NOW() - INTERVAL '11 minutes'
-		WHERE ctid IN (
-			SELECT ctid
+		WHERE id IN (
+			SELECT id
 			FROM auth_attempts
 			WHERE action = $1 AND email = $2 AND outcome = $3
 			LIMIT 1
