@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/mail"
 	"strings"
 	"time"
@@ -159,7 +160,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (db.User, e
 
 	err = s.createLoginAttempt(ctx, email, db.AuthOutcomeSucceeded)
 	if err != nil {
-		return db.User{}, err
+		log.Printf("creating successful auth login attempt: %v", err)
 	}
 
 	return user, nil
