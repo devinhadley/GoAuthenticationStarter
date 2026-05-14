@@ -69,7 +69,7 @@ type MockSessionQueries struct {
 	CreateSessionFn                             func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
 	DeactivateLeastRecentlyUsedSessionForUserFn func(ctx context.Context, userID int64) error
 	DeactivateSessionFn                         func(ctx context.Context, id []byte) error
-	GetSessionFn                                func(ctx context.Context, id []byte) (db.Session, error)
+	GetActiveSessionFn                          func(ctx context.Context, id []byte) (db.Session, error)
 	GetSessionCountByUserFn                     func(ctx context.Context, userID int64) (int64, error)
 	UpdateSessionIDAndRefreshedAtFn             func(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error)
 	UpdateSessionLastSeenToNowFn                func(ctx context.Context, id []byte) (db.Session, error)
@@ -99,9 +99,9 @@ func (q *MockSessionQueries) DeactivateLeastRecentlyUsedSessionForUser(ctx conte
 	return nil
 }
 
-func (q *MockSessionQueries) GetSession(ctx context.Context, id []byte) (db.Session, error) {
-	if q.GetSessionFn != nil {
-		return q.GetSessionFn(ctx, id)
+func (q *MockSessionQueries) GetActiveSession(ctx context.Context, id []byte) (db.Session, error) {
+	if q.GetActiveSessionFn != nil {
+		return q.GetActiveSessionFn(ctx, id)
 	}
 
 	return db.Session{}, pgx.ErrNoRows

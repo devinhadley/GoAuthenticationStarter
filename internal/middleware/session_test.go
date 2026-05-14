@@ -45,7 +45,7 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 	})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
-		GetSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
+		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
 				UserID:          42,
@@ -106,7 +106,7 @@ func testExpiredSessionExpireErrorClearsCookie(t *testing.T) {
 
 	userService := user.NewService(&mocks.MockUserQueries{})
 	sessionService := session.NewService(&mocks.MockSessionQueries{
-		GetSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
+		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
 				UserID:          42,
@@ -165,7 +165,7 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 	})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
-		GetSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
+		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
 				UserID:          42,
@@ -212,7 +212,7 @@ func testRotationSuccessUpdatesLastSeenWithRotatedID(t *testing.T) {
 	userService := user.NewService(&mocks.MockUserQueries{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
-		GetSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
+		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
 				UserID:          42,

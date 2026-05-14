@@ -67,14 +67,15 @@ func (q *Queries) DeactivateSession(ctx context.Context, id []byte) error {
 	return err
 }
 
-const getSession = `-- name: GetSession :one
-SELECT id, user_id, created_at, last_seen_at, last_refreshed_at, is_active
-FROM sessions
-WHERE id = $1 AND is_active = TRUE
+const getActiveSession = `-- name: GetActiveSession :one
+SELECT s.id, s.user_id, s.created_at, s.last_seen_at, s.last_refreshed_at, s.is_active
+FROM sessions s
+JOIN users u on s.user_id = u.id 
+WHERE s.id = $1 AND s.is_active = TRUE and u.is_active = TRUE
 `
 
-func (q *Queries) GetSession(ctx context.Context, id []byte) (Session, error) {
-	row := q.db.QueryRow(ctx, getSession, id)
+func (q *Queries) GetActiveSession(ctx context.Context, id []byte) (Session, error) {
+	row := q.db.QueryRow(ctx, getActiveSession, id)
 	var i Session
 	err := row.Scan(
 		&i.ID,

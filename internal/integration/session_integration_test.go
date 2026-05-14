@@ -20,9 +20,13 @@ import (
 
 func TestSessionMiddlewareCanAuthenticateIntegration(t *testing.T) {
 	t.Run("a cookie with a valid session can be used to authenticate", testValidSessionAuthenticatesCorrectUser)
+}
+
+func TestSessionMiddlewareCannotAuthenticateIntegration(t *testing.T) {
 	t.Run("a cookie with no session is not authenticated", testNoSessionCookieContinuesUnauthenticated)
 	t.Run("a cookie with malformed session id is not authenticated", testMalformedSessionCookieContinuesUnauthenticated)
 	t.Run("a cookie with valid format, but non-existant session id is not authenticated", testSessionIDNotFoundContinuesUnauthenticated)
+	t.Run("a cookie with valid session, but inactive user is not authenticated", testValidSessionButUserInactive)
 }
 
 func TestExpiredSessionIntegration(t *testing.T) {
@@ -203,6 +207,85 @@ func testSessionIDNotFoundContinuesUnauthenticated(t *testing.T) {
 	if !handlerCalled {
 		t.Fatal("expected next handler to be called")
 	}
+}
+
+func testValidSessionButUserInactive(t *testing.T) {
+	deps := getTestDependencies(t)
+	ctx := context.Background()
+	handlerCalled := false
+
+	usr, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    "test@example.com",
+		Password: "a-very-very-secure-password",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user %v", err)
+	}
+
+	createdSession, err := deps.sessionService.CreateSession(ctx, usr)
+	if err != nil {
+		t.Fatalf("failed to create test session %v", err)
+	}
+
+	query := `
+	UPDATE users
+	SET is_active = false
+	WHERE id = $1;
+	`
+	tag, err := deps.pool.Exec(ctx, query, usr.DBUser().ID)
+	if err != nil {
+		t.Fatalf("err when setting user to inactive: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("expected 1 row to be affected but got %v", tag.RowsAffected())
+	}
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+
+		_, err := middleware.UserFromContext(r.Context())
+		if !errors.Is(err, middleware.ErrUserNotInContext) {
+			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
+		}
+
+		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+	}
+
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(createdSession.DBSession().ID),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{}, &sessionCookie)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status ok, got %v", res.Code)
+	}
+
+	if !handlerCalled {
+		t.Fatal("expected next handler to be called")
+	}
+
+	foundClearedCookie := false
+	for _, cookie := range res.Result().Cookies() {
+		if cookie.Name == "id" {
+			foundClearedCookie = true
+			if cookie.MaxAge != -1 {
+				t.Fatalf("expected cleared session cookie max age -1, got %d", cookie.MaxAge)
+			}
+		}
+	}
+
+	if !foundClearedCookie {
+		t.Fatal("expected middleware to clear session cookie")
+	}
+
+	assertSessionActiveState(t, deps, createdSession.DBSession().ID, true)
 }
 
 func testAbsoluteExpiration(t *testing.T) {
