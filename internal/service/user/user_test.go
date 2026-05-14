@@ -61,11 +61,11 @@ func testUserSignUp(t *testing.T) {
 		t.Fatalf("SignUp returned error: %v", err)
 	}
 
-	if user.Email != input.Email {
-		t.Fatalf("got email %q, want %q", user.Email, input.Email)
+	if user.DBUser().Email != input.Email {
+		t.Fatalf("got email %q, want %q", user.DBUser().Email, input.Email)
 	}
 
-	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(user.PasswordHash))
+	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(user.DBUser().PasswordHash))
 	if err != nil {
 		t.Fatalf("VerifyEncoded returned error: %v", err)
 	}
@@ -226,8 +226,8 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 		t.Fatalf("SignUp returned error: %v", err)
 	}
 
-	if user.Email != expectedEmail {
-		t.Fatalf("got email %q, want %q", user.Email, expectedEmail)
+	if user.DBUser().Email != expectedEmail {
+		t.Fatalf("got email %q, want %q", user.DBUser().Email, expectedEmail)
 	}
 }
 
@@ -313,16 +313,16 @@ func testUserLogIn(t *testing.T) {
 		t.Fatalf("got error %v, expected nil", err)
 	}
 
-	if user.ID != id {
-		t.Fatalf("got id %v, expected %v", user.ID, id)
+	if user.DBUser().ID != id {
+		t.Fatalf("got id %v, expected %v", user.DBUser().ID, id)
 	}
 
-	if user.Email != email {
-		t.Fatalf("got email %v, expected %v", user.Email, email)
+	if user.DBUser().Email != email {
+		t.Fatalf("got email %v, expected %v", user.DBUser().Email, email)
 	}
 
-	if user.PasswordHash != string(passwordHash) {
-		t.Fatalf("got password hash %v, expected %v", user.PasswordHash, passwordHash)
+	if user.DBUser().PasswordHash != string(passwordHash) {
+		t.Fatalf("got password hash %v, expected %v", user.DBUser().PasswordHash, passwordHash)
 	}
 
 	if !authAttemptCreated {
@@ -514,8 +514,8 @@ func testLogInWhenUserInactive(t *testing.T) {
 		t.Fatalf("wanted error %v but got %v", ErrInvalidCredentials, err)
 	}
 
-	if usr != (db.User{}) {
-		t.Fatalf("wanted user %v but got %v", db.User{}, usr)
+	if usr != (User{}) {
+		t.Fatalf("wanted user %v but got %v", User{}, usr)
 	}
 
 	if !authAttemptCreated {
@@ -569,12 +569,12 @@ func testGetUserByID(t *testing.T) {
 		t.Fatalf("GetUserByID returned error: %v", err)
 	}
 
-	if user.ID != wantID {
-		t.Fatalf("got id %v, want %v", user.ID, wantID)
+	if user.DBUser().ID != wantID {
+		t.Fatalf("got id %v, want %v", user.DBUser().ID, wantID)
 	}
 
-	if user.Email != wantEmail {
-		t.Fatalf("got email %v, want %v", user.Email, wantEmail)
+	if user.DBUser().Email != wantEmail {
+		t.Fatalf("got email %v, want %v", user.DBUser().Email, wantEmail)
 	}
 }
 

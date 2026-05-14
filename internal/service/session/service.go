@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/service/user"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -39,14 +40,14 @@ var (
 
 const MaxNumberOfActiveSessions = 10
 
-func (s *Service) CreateSession(ctx context.Context, user db.User) (Session, error) {
-	numSessions, err := s.queries.GetSessionCountByUser(ctx, user.ID)
+func (s *Service) CreateSession(ctx context.Context, usr user.User) (Session, error) {
+	numSessions, err := s.queries.GetSessionCountByUser(ctx, usr.DBUser().ID)
 	if err != nil {
 		return Session{}, fmt.Errorf("getting session count: %w", err)
 	}
 
 	if numSessions >= MaxNumberOfActiveSessions {
-		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, user.ID)
+		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, usr.DBUser().ID)
 		if err != nil {
 			return Session{}, fmt.Errorf("deactivating least recently used session: %w", err)
 		}
@@ -59,7 +60,7 @@ func (s *Service) CreateSession(ctx context.Context, user db.User) (Session, err
 
 	session, err := s.queries.CreateSession(ctx, db.CreateSessionParams{
 		ID:     sessionID,
-		UserID: user.ID,
+		UserID: usr.DBUser().ID,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

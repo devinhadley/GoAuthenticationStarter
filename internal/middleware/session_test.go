@@ -73,8 +73,8 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected authenticated user, got error %v", err)
 		}
-		if usr.ID != 42 {
-			t.Fatalf("expected user id 42, got %v", usr.ID)
+		if usr.DBUser().ID != 42 {
+			t.Fatalf("expected user id 42, got %v", usr.DBUser().ID)
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -186,8 +186,8 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected authenticated user, got error %v", err)
 		}
-		if usr.ID != 42 {
-			t.Fatalf("expected user id 42, got %v", usr.ID)
+		if usr.DBUser().ID != 42 {
+			t.Fatalf("expected user id 42, got %v", usr.DBUser().ID)
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -285,12 +285,12 @@ func TestCreateGetUserFuncCachesUser(t *testing.T) {
 		t.Fatalf("second getUser() returned error: %v", err)
 	}
 
-	if gotUserOne.ID != wantUser.ID {
-		t.Fatalf("first getUser() got id %v, want %v", gotUserOne.ID, wantUser.ID)
+	if gotUserOne.DBUser().ID != wantUser.ID {
+		t.Fatalf("first getUser() got id %v, want %v", gotUserOne.DBUser().ID, wantUser.ID)
 	}
 
-	if gotUserTwo.ID != wantUser.ID {
-		t.Fatalf("second getUser() got id %v, want %v", gotUserTwo.ID, wantUser.ID)
+	if gotUserTwo.DBUser().ID != wantUser.ID {
+		t.Fatalf("second getUser() got id %v, want %v", gotUserTwo.DBUser().ID, wantUser.ID)
 	}
 
 	if callCount != 1 {

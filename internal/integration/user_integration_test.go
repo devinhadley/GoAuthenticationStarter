@@ -293,7 +293,7 @@ func testSuccessfulLogin(t *testing.T) {
 	}
 
 	// Session created for the user.
-	count, err := deps.queries.GetSessionCountByUser(ctx, user.ID)
+	count, err := deps.queries.GetSessionCountByUser(ctx, user.DBUser().ID)
 	if err != nil {
 		t.Fatalf("got error %v when getting session count", err)
 	}
@@ -400,7 +400,7 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 	}
 
 	// Session not created for the user.
-	count, err := deps.queries.GetSessionCountByUser(ctx, user.ID)
+	count, err := deps.queries.GetSessionCountByUser(ctx, user.DBUser().ID)
 	if err != nil {
 		t.Fatalf("got error %v when getting session count", err)
 	}
@@ -460,7 +460,7 @@ func testLogInReturnsTooManyRequestsWhenRateLimited(t *testing.T) {
 		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
 	}
 
-	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.ID)
+	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("got error %v when getting session count", err)
 	}
@@ -534,7 +534,7 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.ID)
+	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("got error %v when getting session count", err)
 	}

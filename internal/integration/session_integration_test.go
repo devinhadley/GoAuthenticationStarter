@@ -64,8 +64,8 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 			t.Fatalf("failed to get user from context %v", err)
 		}
 
-		if createdUser.ID != user.ID {
-			t.Fatalf("expected user from context to have id %v, got %v", createdUser.ID, user.ID)
+		if createdUser.DBUser().ID != user.DBUser().ID {
+			t.Fatalf("expected user from context to have id %v, got %v", createdUser.DBUser().ID, user.DBUser().ID)
 		}
 
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -223,9 +223,9 @@ func testAbsoluteExpiration(t *testing.T) {
 	makeSessionAbsolutelyExpired(t, deps, session.DBSession().ID)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		user, err := middleware.UserFromContext(r.Context())
-		if user != (db.User{}) {
-			t.Fatalf("wanted empty user but got %v", user)
+		currentUser, err := middleware.UserFromContext(r.Context())
+		if currentUser != (user.User{}) {
+			t.Fatalf("wanted empty user but got %v", currentUser)
 		}
 		if !errors.Is(err, middleware.ErrUserNotInContext) {
 			t.Fatalf("wanted error %v but got %v", middleware.ErrUserNotInContext, err)
@@ -292,7 +292,7 @@ func testIdleExpiration(t *testing.T) {
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		currentUser, err := middleware.UserFromContext(r.Context())
-		if currentUser != (db.User{}) {
+		if currentUser != (user.User{}) {
 			t.Fatalf("wanted empty user but got %v", currentUser)
 		}
 		if !errors.Is(err, middleware.ErrUserNotInContext) {
@@ -359,8 +359,8 @@ func testSessionRotation(t *testing.T) {
 			t.Fatalf("wanted no error when getting user but got %v", err)
 		}
 
-		if user.ID != createdUser.ID {
-			t.Fatalf("wanted user id %v but got %v", createdUser.ID, user.ID)
+		if user.DBUser().ID != createdUser.DBUser().ID {
+			t.Fatalf("wanted user id %v but got %v", createdUser.DBUser().ID, user.DBUser().ID)
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -490,8 +490,8 @@ func testUpdateLastSeenWhenThresholdReached(t *testing.T) {
 			t.Fatalf("failed to get user from context %v", userErr)
 		}
 
-		if currentUser.ID != createdUser.ID {
-			t.Fatalf("expected user from context to have id %v, got %v", createdUser.ID, currentUser.ID)
+		if currentUser.DBUser().ID != createdUser.DBUser().ID {
+			t.Fatalf("expected user from context to have id %v, got %v", createdUser.DBUser().ID, currentUser.DBUser().ID)
 		}
 
 		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
