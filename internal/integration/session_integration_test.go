@@ -223,9 +223,9 @@ func testAbsoluteExpiration(t *testing.T) {
 	makeSessionAbsolutelyExpired(t, deps, session.DBSession().ID)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		user, err := middleware.UserFromContext(r.Context())
-		if user != (db.User{}) {
-			t.Fatalf("wanted empty user but got %v", user)
+		currentUser, err := middleware.UserFromContext(r.Context())
+		if currentUser != (user.User{}) {
+			t.Fatalf("wanted empty user but got %v", currentUser)
 		}
 		if !errors.Is(err, middleware.ErrUserNotInContext) {
 			t.Fatalf("wanted error %v but got %v", middleware.ErrUserNotInContext, err)
@@ -292,7 +292,7 @@ func testIdleExpiration(t *testing.T) {
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		currentUser, err := middleware.UserFromContext(r.Context())
-		if currentUser != (db.User{}) {
+		if currentUser != (user.User{}) {
 			t.Fatalf("wanted empty user but got %v", currentUser)
 		}
 		if !errors.Is(err, middleware.ErrUserNotInContext) {

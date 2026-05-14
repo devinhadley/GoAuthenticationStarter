@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 
-	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 	"devinhadley/gobootstrapweb/internal/utils"
@@ -22,16 +21,16 @@ var (
 	ErrUserNotInContext = errors.New("user not found in request context")
 )
 
-type GetUserFunc func() (db.User, error)
+type GetUserFunc func() (user.User, error)
 
 func withGetUser(ctx context.Context, getUser GetUserFunc) context.Context {
 	return context.WithValue(ctx, getUserContextKey, getUser)
 }
 
-func UserFromContext(ctx context.Context) (db.User, error) {
+func UserFromContext(ctx context.Context) (user.User, error) {
 	getUser, ok := ctx.Value(getUserContextKey).(GetUserFunc)
 	if !ok {
-		return db.User{}, ErrUserNotInContext
+		return user.User{}, ErrUserNotInContext
 	}
 
 	return getUser()
@@ -106,27 +105,27 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 	}
 }
 
-func createGetUserFunc(userID int64, userService *user.Service, ctx context.Context) func() (db.User, error) {
-	var currentUser *db.User
+func createGetUserFunc(userID int64, userService *user.Service, ctx context.Context) func() (user.User, error) {
+	var currentUser *user.User
 	var fetchCurrentUserError error
 
-	return func() (db.User, error) {
+	return func() (user.User, error) {
 		if currentUser != nil {
 			return *currentUser, nil
 		}
 
 		if fetchCurrentUserError != nil {
-			return db.User{}, fetchCurrentUserError
+			return user.User{}, fetchCurrentUserError
 		}
 
-		user, err := userService.GetUserByID(ctx, userID)
+		usr, err := userService.GetUserByID(ctx, userID)
 		if err != nil {
 			fetchCurrentUserError = err
-			return db.User{}, err
+			return user.User{}, err
 		}
 
-		currentUser = &user
+		currentUser = &usr
 
-		return user, nil
+		return usr, nil
 	}
 }

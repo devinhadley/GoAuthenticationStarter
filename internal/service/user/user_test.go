@@ -514,8 +514,8 @@ func testLogInWhenUserInactive(t *testing.T) {
 		t.Fatalf("wanted error %v but got %v", ErrInvalidCredentials, err)
 	}
 
-	if usr != (db.User{}) {
-		t.Fatalf("wanted user %v but got %v", db.User{}, usr)
+	if usr != (User{}) {
+		t.Fatalf("wanted user %v but got %v", User{}, usr)
 	}
 
 	if !authAttemptCreated {
