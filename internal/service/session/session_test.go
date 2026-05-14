@@ -58,7 +58,7 @@ func TestExpireSession(t *testing.T) {
 
 func testCreateValidSession(t *testing.T) {
 	ctx := context.Background()
-	usr := user.User{User: db.User{ID: 1}}
+	usr := user.UserFromDB(db.User{ID: 1})
 
 	var createSessionArg db.CreateSessionParams
 
@@ -66,8 +66,8 @@ func testCreateValidSession(t *testing.T) {
 		CreateSessionFn: func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
 			createSessionArg = arg
 
-			if arg.UserID != usr.ID {
-				t.Fatalf("CreateSession got user id %v, want %v", arg.UserID, usr.ID)
+			if arg.UserID != usr.DBUser().ID {
+				t.Fatalf("CreateSession got user id %v, want %v", arg.UserID, usr.DBUser().ID)
 			}
 
 			if len(arg.ID) != 16 {
@@ -92,8 +92,8 @@ func testCreateValidSession(t *testing.T) {
 
 	rawSession := session.DBSession()
 
-	if rawSession.UserID != usr.ID {
-		t.Fatalf("got user id %v, want %v", rawSession.UserID, usr.ID)
+	if rawSession.UserID != usr.DBUser().ID {
+		t.Fatalf("got user id %v, want %v", rawSession.UserID, usr.DBUser().ID)
 	}
 
 	if len(rawSession.ID) != 16 {
@@ -107,7 +107,7 @@ func testCreateValidSession(t *testing.T) {
 
 func testCreateSessionReturnsUserNotFound(t *testing.T) {
 	ctx := context.Background()
-	usr := user.User{User: db.User{ID: 999}}
+	usr := user.UserFromDB(db.User{ID: 999})
 
 	sessionService := NewService(&mocks.MockSessionQueries{
 		CreateSessionFn: func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
@@ -126,7 +126,7 @@ func testCreateSessionReturnsUserNotFound(t *testing.T) {
 
 func testCreateSessionReturnsSessionCountError(t *testing.T) {
 	ctx := context.Background()
-	usr := user.User{User: db.User{ID: 99}}
+	usr := user.UserFromDB(db.User{ID: 99})
 	wantErr := errors.New("failed to get session count")
 
 	sessionService := NewService(&mocks.MockSessionQueries{
@@ -147,7 +147,7 @@ func testCreateSessionReturnsSessionCountError(t *testing.T) {
 
 func testCreateSessionReturnsDeleteLeastRecentlyUsedSessionError(t *testing.T) {
 	ctx := context.Background()
-	usr := user.User{User: db.User{ID: 42}}
+	usr := user.UserFromDB(db.User{ID: 42})
 	wantErr := errors.New("failed to delete least recently used session")
 
 	sessionService := NewService(&mocks.MockSessionQueries{
@@ -171,7 +171,7 @@ func testCreateSessionReturnsDeleteLeastRecentlyUsedSessionError(t *testing.T) {
 
 func testCreateSessionReturnsCreateSessionError(t *testing.T) {
 	ctx := context.Background()
-	usr := user.User{User: db.User{ID: 7}}
+	usr := user.UserFromDB(db.User{ID: 7})
 	wantErr := errors.New("failed to create session")
 
 	sessionService := NewService(&mocks.MockSessionQueries{
@@ -188,14 +188,14 @@ func testCreateSessionReturnsCreateSessionError(t *testing.T) {
 
 func testCreateSessionDeletesOldestWhenSessionCountExceedsLimit(t *testing.T) {
 	ctx := context.Background()
-	usr := user.User{User: db.User{ID: 42}}
+	usr := user.UserFromDB(db.User{ID: 42})
 
 	deleteOldestCalled := false
 
 	sessionService := NewService(&mocks.MockSessionQueries{
 		GetSessionCountByUserFn: func(ctx context.Context, userID int64) (int64, error) {
-			if userID != usr.ID {
-				t.Fatalf("GetSessionCountByUser got user id %v, want %v", userID, usr.ID)
+			if userID != usr.DBUser().ID {
+				t.Fatalf("GetSessionCountByUser got user id %v, want %v", userID, usr.DBUser().ID)
 			}
 
 			return 11, nil
@@ -203,8 +203,8 @@ func testCreateSessionDeletesOldestWhenSessionCountExceedsLimit(t *testing.T) {
 		DeactivateLeastRecentlyUsedSessionForUserFn: func(ctx context.Context, userID int64) error {
 			deleteOldestCalled = true
 
-			if userID != usr.ID {
-				t.Fatalf("DeleteLeastRecentlyUsedSessionByUser got user id %v, want %v", userID, usr.ID)
+			if userID != usr.DBUser().ID {
+				t.Fatalf("DeleteLeastRecentlyUsedSessionByUser got user id %v, want %v", userID, usr.DBUser().ID)
 			}
 
 			return nil

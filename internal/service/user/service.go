@@ -99,7 +99,7 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, err
 		return User{}, fmt.Errorf("creating user: %w", err)
 	}
 
-	return userFromDB(user), nil
+	return UserFromDB(user), nil
 }
 
 func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -163,7 +163,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 		log.Printf("creating successful auth login attempt: %v", err)
 	}
 
-	return userFromDB(user), nil
+	return UserFromDB(user), nil
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -177,7 +177,7 @@ func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {
 		return User{}, fmt.Errorf("getting user by id: %w", err)
 
 	}
-	return userFromDB(user), nil
+	return UserFromDB(user), nil
 }
 
 func trimAndRequireValue(value string) (string, bool) {

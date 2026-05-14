@@ -41,13 +41,13 @@ var (
 const MaxNumberOfActiveSessions = 10
 
 func (s *Service) CreateSession(ctx context.Context, usr user.User) (Session, error) {
-	numSessions, err := s.queries.GetSessionCountByUser(ctx, usr.ID)
+	numSessions, err := s.queries.GetSessionCountByUser(ctx, usr.DBUser().ID)
 	if err != nil {
 		return Session{}, fmt.Errorf("getting session count: %w", err)
 	}
 
 	if numSessions >= MaxNumberOfActiveSessions {
-		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, usr.ID)
+		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, usr.DBUser().ID)
 		if err != nil {
 			return Session{}, fmt.Errorf("deactivating least recently used session: %w", err)
 		}
@@ -60,7 +60,7 @@ func (s *Service) CreateSession(ctx context.Context, usr user.User) (Session, er
 
 	session, err := s.queries.CreateSession(ctx, db.CreateSessionParams{
 		ID:     sessionID,
-		UserID: usr.ID,
+		UserID: usr.DBUser().ID,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
