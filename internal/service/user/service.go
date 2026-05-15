@@ -45,6 +45,8 @@ type UserQueries interface {
 	GetUserByID(ctx context.Context, id int64) (db.User, error)
 	CountFailedAuthAttemptsSince(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
 	CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
+	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
+	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
 }
 
 type Service struct {
@@ -77,11 +79,9 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, err
 		return User{}, ErrInvalidEmail
 	}
 
-	argon := argon2.MemoryConstrainedDefaults()
-
-	passwordHash, err := argon.HashEncoded([]byte(input.Password))
+	passwordHash, err := createPasswordHash(input.Password)
 	if err != nil {
-		return User{}, fmt.Errorf("when hashing password: %w", err)
+		return User{}, fmt.Errorf("when hashing password during sign up: %w", err)
 	}
 
 	user, err := s.queries.CreateUser(ctx, db.CreateUserParams{
@@ -164,6 +164,45 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	}
 
 	return UserFromDB(user), nil
+}
+
+func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user User, currentPassword string, newPassword string) (bool, error) {
+	err := s.isValidPassword(newPassword)
+	if err != nil {
+		return false, err
+	}
+
+	ok, err := argon2.VerifyEncoded([]byte(currentPassword), []byte(user.DBUser().PasswordHash))
+	if err != nil {
+		return false, fmt.Errorf("validating password hash: %w", err)
+	}
+
+	if !ok {
+		return false, ErrInvalidCredentials
+	}
+
+	newPasswordHash, err := createPasswordHash(newPassword)
+	if err != nil {
+		return false, fmt.Errorf("hashing password during authenticated reset: %w", err)
+	}
+
+	err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
+		ID:           user.DBUser().ID,
+		PasswordHash: string(newPasswordHash),
+	})
+	if err != nil {
+		return false, fmt.Errorf("updating password hash during authenticated password reset: %w", err)
+	}
+
+	// If for any reason we fail to deactivate sessions, we should still let the password reset go through.
+	// This is still bad though and deactivation should be retried at some point.
+	err = s.queries.DeactivateAllSessionsForUser(ctx, user.DBUser().ID)
+	if err != nil {
+		log.Printf("deactivating all sessions during authenticated password reset: %v", err)
+		return true, nil
+	}
+
+	return true, nil
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -275,4 +314,15 @@ func normalizeAndValidateEmail(input string) (string, bool) {
 
 	normalized := local + "@" + strings.ToLower(domain)
 	return normalized, true
+}
+
+func createPasswordHash(password string) ([]byte, error) {
+	argon := argon2.MemoryConstrainedDefaults()
+
+	passwordHash, err := argon.HashEncoded([]byte(password))
+	if err != nil {
+		return nil, err
+	}
+
+	return passwordHash, nil
 }

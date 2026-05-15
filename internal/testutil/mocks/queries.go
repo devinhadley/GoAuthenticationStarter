@@ -14,6 +14,8 @@ type MockUserQueries struct {
 	GetUserByIDFn                  func(ctx context.Context, id int64) (db.User, error)
 	CountFailedAuthAttemptsSinceFn func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
 	CreateLoginAuthAttemptFn       func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
+	UpdatePasswordHashFn           func(ctx context.Context, arg db.UpdatePasswordHashParams) error
+	DeactivateAllSessionsForUserFn func(ctx context.Context, userID int64) error
 }
 
 func (q *MockUserQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
@@ -60,6 +62,22 @@ func (q *MockUserQueries) CountFailedAuthAttemptsSince(ctx context.Context, arg 
 func (q *MockUserQueries) CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
 	if q.CreateLoginAuthAttemptFn != nil {
 		return q.CreateLoginAuthAttemptFn(ctx, arg)
+	}
+
+	return nil
+}
+
+func (q *MockUserQueries) UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error {
+	if q.UpdatePasswordHashFn != nil {
+		return q.UpdatePasswordHashFn(ctx, arg)
+	}
+
+	return nil
+}
+
+func (q *MockUserQueries) DeactivateAllSessionsForUser(ctx context.Context, userID int64) error {
+	if q.DeactivateAllSessionsForUserFn != nil {
+		return q.DeactivateAllSessionsForUserFn(ctx, userID)
 	}
 
 	return nil

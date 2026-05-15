@@ -57,6 +57,7 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("can reset password with token", needsImplemented)
 	t.Run("cant reset password with incorrect token", needsImplemented)
 	t.Run("cant reset password with expired token", needsImplemented)
+	t.Run("password reset doesn't allow weak pass", needsImplemented)
 }
 
 func testUserSignUp(t *testing.T) {

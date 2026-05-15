@@ -47,3 +47,7 @@ WHERE id = (
   LIMIT 1
 );
 
+-- name: DeactivateAllSessionsForUser :exec
+UPDATE sessions
+SET is_active = FALSE
+WHERE user_id = $1 AND is_active = TRUE;

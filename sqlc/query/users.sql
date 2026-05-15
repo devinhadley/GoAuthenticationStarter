@@ -17,3 +17,8 @@ WHERE email = $1;
 SELECT id, email, password_hash, signed_up_at, is_active
 FROM users
 WHERE id = $1;
+
+-- name: UpdatePasswordHash :exec
+UPDATE users
+SET password_hash = $2
+WHERE id = $1;
