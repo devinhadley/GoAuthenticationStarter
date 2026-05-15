@@ -14,7 +14,7 @@ build: ## Build the app binary
 	@go build -o bin/app ./cmd
 
 test: ## Run all tests
-	@go test -short ./...
+	@go test ./...
 
 fmt: ## Format Go files
 	@go fmt ./...
@@ -46,9 +46,6 @@ db-up: ## Apply all goose migrations
 
 db-down: ## Roll back one goose migration
 	@set -a; source .env; set +a; goose -dir "$${GOOSE_MIGRATION_DIR}" down
-
-test-integration: ## Run integration tests against integration DB
-	go test -p 1 ./internal/integration/...
 
 debug-integration: ## Runs integration tests via dlv debugger.
 	dlv test ./internal/integration -- -test.v

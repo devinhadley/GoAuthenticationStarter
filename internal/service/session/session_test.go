@@ -452,7 +452,7 @@ func testGetSessionReturnsError(t *testing.T) {
 	wantErr := errors.New("failed to get session")
 
 	sessionService := NewService(&mocks.MockSessionQueries{
-		GetSessionFn: func(callCtx context.Context, id []byte) (db.Session, error) {
+		GetActiveSessionFn: func(callCtx context.Context, id []byte) (db.Session, error) {
 			if callCtx != ctx {
 				t.Fatal("GetSessionByID called with unexpected context")
 			}

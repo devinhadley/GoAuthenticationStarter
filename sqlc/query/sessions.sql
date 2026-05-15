@@ -8,10 +8,11 @@ INSERT INTO sessions (
 )
 RETURNING *;
 
--- name: GetSession :one
-SELECT *
-FROM sessions
-WHERE id = $1 AND is_active = TRUE;
+-- name: GetActiveSession :one
+SELECT s.*
+FROM sessions s
+JOIN users u on s.user_id = u.id 
+WHERE s.id = $1 AND s.is_active = TRUE and u.is_active = TRUE;
 
 -- name: DeactivateSession :exec
 UPDATE sessions
