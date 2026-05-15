@@ -47,6 +47,18 @@ func TestNormalizeAndValidateEmail(t *testing.T) {
 	t.Run("rejects invalid emails", testNormalizeAndValidateEmailInvalidInputs)
 }
 
+func TestPasswordRest(t *testing.T) {
+	t.Run("can reset password when authenticated", needsImplemented)
+	t.Run("password reset fails with authenticated user if existing password incorrect", needsImplemented)
+	t.Run("can request token password reset", needsImplemented)
+	t.Run("requesting token password reset response for unkown email matches known", needsImplemented)
+	t.Run("cant request more than 3 password resets for a particular email in an hour", needsImplemented)
+	t.Run("cant request more than 1 password resets for a particular email in 10 minutes", needsImplemented)
+	t.Run("can reset password with token", needsImplemented)
+	t.Run("cant reset password with incorrect token", needsImplemented)
+	t.Run("cant reset password with expired token", needsImplemented)
+}
+
 func testUserSignUp(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{})
 	ctx := context.Background()
@@ -676,4 +688,8 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 func setupUserService(t *testing.T, mockedQueries mocks.MockUserQueries) *Service {
 	t.Helper()
 	return NewService(&mockedQueries)
+}
+
+func needsImplemented(t *testing.T) {
+	t.Skip()
 }

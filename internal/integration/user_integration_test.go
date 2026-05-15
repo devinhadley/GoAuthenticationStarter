@@ -57,6 +57,13 @@ func TestLogInIntegration(t *testing.T) {
 	t.Run("test rejects invalid email", testLogInRejectsInvalidEmail)
 }
 
+func TestPasswordResetIntegration(t *testing.T) {
+	t.Run("password reset succeeds with authenticated user and deactivates sessions", needsImplemented)
+	t.Run("password reset suceeds with a valid reset token and deactivates sessions", needsImplemented)
+	t.Run("cant reset password with incorrect token", needsImplemented)
+	t.Run("cant reset password with already used token", needsImplemented)
+}
+
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
