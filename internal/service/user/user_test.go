@@ -60,182 +60,6 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("cant reset password with expired token", needsImplemented)
 }
 
-func testResetPasswordForAuthenticatedUser(t *testing.T) {
-	ctx := context.Background()
-	currentPassword := "correct-current-password"
-	newPassword := "brand-new-password"
-
-	argon := argon2.MemoryConstrainedDefaults()
-	currentPasswordHash, err := argon.HashEncoded([]byte(currentPassword))
-	if err != nil {
-		t.Fatalf("HashEncoded returned error: %v", err)
-	}
-
-	usr := UserFromDB(db.User{
-		ID:           42,
-		PasswordHash: string(currentPasswordHash),
-	})
-
-	updated := false
-	sessionsDeactivated := false
-	var updatedHash string
-
-	userService := setupUserService(t, mocks.MockUserQueries{
-		UpdatePasswordHashFn: func(callCtx context.Context, arg db.UpdatePasswordHashParams) error {
-			if callCtx != ctx {
-				t.Fatal("UpdatePasswordHash called with unexpected context")
-			}
-
-			if arg.ID != usr.DBUser().ID {
-				t.Fatalf("UpdatePasswordHash got id %v, want %v", arg.ID, usr.DBUser().ID)
-			}
-
-			updated = true
-			updatedHash = arg.PasswordHash
-			return nil
-		},
-		DeactivateAllSessionsForUserFn: func(callCtx context.Context, userID int64) error {
-			if callCtx != ctx {
-				t.Fatal("DeactivateAllSessionsForUser called with unexpected context")
-			}
-
-			if userID != usr.DBUser().ID {
-				t.Fatalf("DeactivateAllSessionsForUser got userID %v, want %v", userID, usr.DBUser().ID)
-			}
-
-			sessionsDeactivated = true
-			return nil
-		},
-	})
-
-	ok, err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, currentPassword, newPassword)
-	if err != nil {
-		t.Fatalf("ResetPasswordForAuthenticatedUser returned error: %v", err)
-	}
-
-	if !ok {
-		t.Fatal("ResetPasswordForAuthenticatedUser returned ok=false, want ok=true")
-	}
-
-	if !updated {
-		t.Fatal("UpdatePasswordHash was not called")
-	}
-
-	if !sessionsDeactivated {
-		t.Fatal("DeactivateAllSessionsForUser was not called")
-	}
-
-	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(updatedHash))
-	if err != nil {
-		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
-	}
-	if !newPasswordMatches {
-		t.Fatal("updated hash does not match new password")
-	}
-
-	oldPasswordMatches, err := argon2.VerifyEncoded([]byte(currentPassword), []byte(updatedHash))
-	if err != nil {
-		t.Fatalf("VerifyEncoded returned error for current password: %v", err)
-	}
-	if oldPasswordMatches {
-		t.Fatal("updated hash matched current password, expected new password hash")
-	}
-}
-
-func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
-	ctx := context.Background()
-	actualCurrentPassword := "correct-current-password"
-	providedCurrentPassword := "wrong-current-password"
-	newPassword := "brand-new-password"
-
-	argon := argon2.MemoryConstrainedDefaults()
-	currentPasswordHash, err := argon.HashEncoded([]byte(actualCurrentPassword))
-	if err != nil {
-		t.Fatalf("HashEncoded returned error: %v", err)
-	}
-
-	usr := UserFromDB(db.User{
-		ID:           84,
-		PasswordHash: string(currentPasswordHash),
-	})
-
-	userService := setupUserService(t, mocks.MockUserQueries{
-		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
-			t.Fatal("UpdatePasswordHash should not be called when current password is incorrect")
-			return nil
-		},
-		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
-			t.Fatal("DeactivateAllSessionsForUser should not be called when current password is incorrect")
-			return nil
-		},
-	})
-
-	ok, err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, providedCurrentPassword, newPassword)
-	if !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("got error %v, want %v", err, ErrInvalidCredentials)
-	}
-
-	if ok {
-		t.Fatal("ResetPasswordForAuthenticatedUser returned ok=true, want ok=false")
-	}
-}
-
-func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
-	ctx := context.Background()
-	currentPassword := "correct-current-password"
-
-	argon := argon2.MemoryConstrainedDefaults()
-	currentPasswordHash, err := argon.HashEncoded([]byte(currentPassword))
-	if err != nil {
-		t.Fatalf("HashEncoded returned error: %v", err)
-	}
-
-	usr := UserFromDB(db.User{
-		ID:           128,
-		PasswordHash: string(currentPasswordHash),
-	})
-
-	testCases := []struct {
-		name          string
-		newPassword   string
-		expectedError error
-	}{
-		{name: "empty password", newPassword: "", expectedError: ErrPasswordEmpty},
-		{name: "whitespace password", newPassword: "   ", expectedError: ErrPasswordEmpty},
-		{name: "short password", newPassword: "12345678901", expectedError: ErrPasswordShort},
-		{name: "long password", newPassword: strings.Repeat("a", 257), expectedError: ErrPasswordLong},
-		{name: "common password", newPassword: "thisiscommonpassword", expectedError: ErrPasswordCommon},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			userService := setupUserService(t, mocks.MockUserQueries{
-				UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
-					t.Fatal("UpdatePasswordHash should not be called for weak password")
-					return nil
-				},
-				DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
-					t.Fatal("DeactivateAllSessionsForUser should not be called for weak password")
-					return nil
-				},
-			})
-
-			if errors.Is(tc.expectedError, ErrPasswordCommon) {
-				userService.commonPasswords = commonPasswords{tc.newPassword: struct{}{}}
-			}
-
-			ok, err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, currentPassword, tc.newPassword)
-			if !errors.Is(err, tc.expectedError) {
-				t.Fatalf("got error %v, want %v", err, tc.expectedError)
-			}
-
-			if ok {
-				t.Fatal("ResetPasswordForAuthenticatedUser returned ok=true, want ok=false")
-			}
-		})
-	}
-}
-
 func testUserSignUp(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{})
 	ctx := context.Background()
@@ -825,6 +649,179 @@ func testNormalizeAndValidateEmailValidInputs(t *testing.T) {
 
 			if normalized != tc.expected {
 				t.Fatalf("normalizeAndValidateEmail(%q) returned %q, want %q", tc.input, normalized, tc.expected)
+			}
+		})
+	}
+}
+
+func testResetPasswordForAuthenticatedUser(t *testing.T) {
+	ctx := context.Background()
+	currentPassword := "correct-current-password"
+	newPassword := "brand-new-password"
+
+	argon := argon2.MemoryConstrainedDefaults()
+	currentPasswordHash, err := argon.HashEncoded([]byte(currentPassword))
+	if err != nil {
+		t.Fatalf("HashEncoded returned error: %v", err)
+	}
+
+	usr := UserFromDB(db.User{
+		ID:           42,
+		PasswordHash: string(currentPasswordHash),
+	})
+
+	updated := false
+	sessionsDeactivated := false
+	var updatedHash string
+
+	userService := setupUserService(t, mocks.MockUserQueries{
+		UpdatePasswordHashFn: func(callCtx context.Context, arg db.UpdatePasswordHashParams) error {
+			if callCtx != ctx {
+				t.Fatal("UpdatePasswordHash called with unexpected context")
+			}
+
+			if arg.ID != usr.DBUser().ID {
+				t.Fatalf("UpdatePasswordHash got id %v, want %v", arg.ID, usr.DBUser().ID)
+			}
+
+			updated = true
+			updatedHash = arg.PasswordHash
+			return nil
+		},
+		DeactivateAllSessionsForUserFn: func(callCtx context.Context, userID int64) error {
+			if callCtx != ctx {
+				t.Fatal("DeactivateAllSessionsForUser called with unexpected context")
+			}
+
+			if userID != usr.DBUser().ID {
+				t.Fatalf("DeactivateAllSessionsForUser got userID %v, want %v", userID, usr.DBUser().ID)
+			}
+
+			sessionsDeactivated = true
+			return nil
+		},
+	})
+
+	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, PasswordResetBody{
+		Password:    currentPassword,
+		NewPassword: newPassword,
+	})
+	if err != nil {
+		t.Fatalf("ResetPasswordForAuthenticatedUser returned error: %v", err)
+	}
+
+	if !updated {
+		t.Fatal("UpdatePasswordHash was not called")
+	}
+
+	if !sessionsDeactivated {
+		t.Fatal("DeactivateAllSessionsForUser was not called")
+	}
+
+	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(updatedHash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
+	}
+	if !newPasswordMatches {
+		t.Fatal("updated hash does not match new password")
+	}
+
+	oldPasswordMatches, err := argon2.VerifyEncoded([]byte(currentPassword), []byte(updatedHash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error for current password: %v", err)
+	}
+	if oldPasswordMatches {
+		t.Fatal("updated hash matched current password, expected new password hash")
+	}
+}
+
+func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
+	ctx := context.Background()
+	actualCurrentPassword := "correct-current-password"
+	providedCurrentPassword := "wrong-current-password"
+	newPassword := "brand-new-password"
+
+	argon := argon2.MemoryConstrainedDefaults()
+	currentPasswordHash, err := argon.HashEncoded([]byte(actualCurrentPassword))
+	if err != nil {
+		t.Fatalf("HashEncoded returned error: %v", err)
+	}
+
+	usr := UserFromDB(db.User{
+		ID:           84,
+		PasswordHash: string(currentPasswordHash),
+	})
+
+	userService := setupUserService(t, mocks.MockUserQueries{
+		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
+			t.Fatal("UpdatePasswordHash should not be called when current password is incorrect")
+			return nil
+		},
+		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
+			t.Fatal("DeactivateAllSessionsForUser should not be called when current password is incorrect")
+			return nil
+		},
+	})
+
+	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, PasswordResetBody{
+		Password:    providedCurrentPassword,
+		NewPassword: newPassword,
+	})
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("got error %v, want %v", err, ErrInvalidCredentials)
+	}
+}
+
+func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
+	ctx := context.Background()
+	currentPassword := "correct-current-password"
+
+	argon := argon2.MemoryConstrainedDefaults()
+	currentPasswordHash, err := argon.HashEncoded([]byte(currentPassword))
+	if err != nil {
+		t.Fatalf("HashEncoded returned error: %v", err)
+	}
+
+	usr := UserFromDB(db.User{
+		ID:           128,
+		PasswordHash: string(currentPasswordHash),
+	})
+
+	testCases := []struct {
+		name          string
+		newPassword   string
+		expectedError error
+	}{
+		{name: "empty password", newPassword: "", expectedError: ErrPasswordEmpty},
+		{name: "whitespace password", newPassword: "   ", expectedError: ErrPasswordEmpty},
+		{name: "short password", newPassword: "12345678901", expectedError: ErrPasswordShort},
+		{name: "long password", newPassword: strings.Repeat("a", 257), expectedError: ErrPasswordLong},
+		{name: "common password", newPassword: "thisiscommonpassword", expectedError: ErrPasswordCommon},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			userService := setupUserService(t, mocks.MockUserQueries{
+				UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
+					t.Fatal("UpdatePasswordHash should not be called for weak password")
+					return nil
+				},
+				DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
+					t.Fatal("DeactivateAllSessionsForUser should not be called for weak password")
+					return nil
+				},
+			})
+
+			if errors.Is(tc.expectedError, ErrPasswordCommon) {
+				userService.commonPasswords = commonPasswords{tc.newPassword: struct{}{}}
+			}
+
+			err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, PasswordResetBody{
+				Password:    currentPassword,
+				NewPassword: tc.newPassword,
+			})
+			if !errors.Is(err, tc.expectedError) {
+				t.Fatalf("got error %v, want %v", err, tc.expectedError)
 			}
 		})
 	}

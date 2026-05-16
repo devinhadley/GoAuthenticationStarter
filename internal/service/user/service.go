@@ -59,6 +59,11 @@ type AuthenticateBody struct {
 	Password string `json:"password"`
 }
 
+type PasswordResetBody struct {
+	Password    string `json:"password"`
+	NewPassword string `json:"newPassword"`
+}
+
 func NewService(queries UserQueries) *Service {
 	return &Service{queries: queries, commonPasswords: getCommonPasswords()}
 }
@@ -166,24 +171,24 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	return UserFromDB(user), nil
 }
 
-func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user User, currentPassword string, newPassword string) (bool, error) {
-	err := s.isValidPassword(newPassword)
+func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user User, input PasswordResetBody) error {
+	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	ok, err := argon2.VerifyEncoded([]byte(currentPassword), []byte(user.DBUser().PasswordHash))
+	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(user.DBUser().PasswordHash))
 	if err != nil {
-		return false, fmt.Errorf("validating password hash: %w", err)
+		return fmt.Errorf("validating password hash: %w", err)
 	}
 
 	if !ok {
-		return false, ErrInvalidCredentials
+		return ErrInvalidCredentials
 	}
 
-	newPasswordHash, err := createPasswordHash(newPassword)
+	newPasswordHash, err := createPasswordHash(input.NewPassword)
 	if err != nil {
-		return false, fmt.Errorf("hashing password during authenticated reset: %w", err)
+		return fmt.Errorf("hashing password during authenticated reset: %w", err)
 	}
 
 	err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
@@ -191,7 +196,7 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user Us
 		PasswordHash: string(newPasswordHash),
 	})
 	if err != nil {
-		return false, fmt.Errorf("updating password hash during authenticated password reset: %w", err)
+		return fmt.Errorf("updating password hash during authenticated password reset: %w", err)
 	}
 
 	// If for any reason we fail to deactivate sessions, we should still let the password reset go through.
@@ -199,10 +204,10 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user Us
 	err = s.queries.DeactivateAllSessionsForUser(ctx, user.DBUser().ID)
 	if err != nil {
 		log.Printf("deactivating all sessions during authenticated password reset: %v", err)
-		return true, nil
+		return nil
 	}
 
-	return true, nil
+	return nil
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {
