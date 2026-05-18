@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/service/user"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -171,13 +172,13 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	return UserFromDB(user), nil
 }
 
-func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user User, input PasswordResetBody) error {
+func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr User, input PasswordResetBody) error {
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
 		return err
 	}
 
-	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(user.DBUser().PasswordHash))
+	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(usr.DBUser().PasswordHash))
 	if err != nil {
 		return fmt.Errorf("validating password hash: %w", err)
 	}
@@ -192,22 +193,47 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, user Us
 	}
 
 	err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
-		ID:           user.DBUser().ID,
+		ID:           usr.DBUser().ID,
 		PasswordHash: string(newPasswordHash),
 	})
 	if err != nil {
 		return fmt.Errorf("updating password hash during authenticated password reset: %w", err)
 	}
 
+	// NOTE:
 	// If for any reason we fail to deactivate sessions, we should still let the password reset go through.
 	// This is still bad though and deactivation should be retried at some point.
-	err = s.queries.DeactivateAllSessionsForUser(ctx, user.DBUser().ID)
+	err = s.queries.DeactivateAllSessionsForUser(ctx, usr.DBUser().ID)
 	if err != nil {
 		log.Printf("deactivating all sessions during authenticated password reset: %v", err)
 		return nil
 	}
 
 	return nil
+}
+
+func (s *Service) CreatePasswordResetRequest(ctx context.Context, usr user.Service) {
+	// Get user from email.
+	// Ensure no more than 2 email resets per hour
+	// Ensure no more than 1 email reset per 10 minutes.
+	// Use generic error here.
+
+	// Generate cryptographically random 128 bit token.
+	// Create record in db.
+	// Construct into url safe query param.
+	// Send link via email.
+
+	// Record the auth attempt.
+	// return 204
+}
+
+func (s *Service) ResetPasswordFromResetRequest(ctx context.Context) {
+	// Get request from db
+	// Ensure reset request not expired (15 minutes).
+	// return generic error if either fail
+	// if in db update password
+	// deactivate all sessions
+	// return 204
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {

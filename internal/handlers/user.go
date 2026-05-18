@@ -99,6 +99,8 @@ func CreateAuthenticatedPasswordResetHandler(userService *user.Service) http.Han
 		}
 
 		// TODO: Make me middleware!
+		// Handler should exit early if no get user closure in context!
+		// That is views that expect authentication should never ever handle user not in context.
 		usr, err := middleware.UserFromContext(r.Context())
 		if err != nil {
 			if errors.Is(err, middleware.ErrUserNotInContext) {
