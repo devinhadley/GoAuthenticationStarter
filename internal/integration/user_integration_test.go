@@ -3,6 +3,7 @@ package integration
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/handlers"
+	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 
@@ -22,11 +24,12 @@ import (
 )
 
 type userIntegrationDeps struct {
-	pool        *pgxpool.Pool
-	queries     *db.Queries
-	userService *user.Service
-	signUp      http.HandlerFunc
-	login       http.HandlerFunc
+	pool           *pgxpool.Pool
+	queries        *db.Queries
+	userService    *user.Service
+	sessionService *session.Service
+	signUp         http.HandlerFunc
+	login          http.HandlerFunc
 }
 
 func TestSignUpIntegration(t *testing.T) {
@@ -58,7 +61,12 @@ func TestLogInIntegration(t *testing.T) {
 }
 
 func TestPasswordResetIntegration(t *testing.T) {
-	t.Run("password reset succeeds with authenticated user and deactivates sessions", needsImplemented)
+	// authenticated password reset.
+	t.Run("password reset succeeds with authenticated user and deactivates sessions", testAuthenticatedPasswordResetSucceeds)
+	t.Run("password reset fails with incorrect password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWrongPassword)
+	t.Run("password reset fails with weak password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWeakPassword)
+
+	// token based password reset.
 	t.Run("password reset suceeds with a valid reset token and deactivates sessions", needsImplemented)
 	t.Run("cant reset password with incorrect token", needsImplemented)
 	t.Run("cant reset password with already used token", needsImplemented)
@@ -568,6 +576,224 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 	assertSessionCookieExists(t, rec)
 }
 
+func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-authenticated@example.com"
+	currentPassword := "current-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	var requestSession session.Session
+	for range 3 {
+		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser)
+		if err != nil {
+			t.Fatalf("failed to create active session: %v", err)
+		}
+	}
+
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    currentPassword,
+		"newPassword": newPassword,
+	}, &sessionCookie)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	foundClearedCookie := false
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			foundClearedCookie = true
+			if cookie.Value != "" {
+				t.Fatalf("expected cleared session cookie value, got %q", cookie.Value)
+			}
+			if cookie.MaxAge != -1 {
+				t.Fatalf("expected cleared session cookie max age -1, got %d", cookie.MaxAge)
+			}
+		}
+	}
+
+	if !foundClearedCookie {
+		t.Fatal("expected handler to clear session cookie")
+	}
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after password reset: %v", err)
+	}
+
+	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(storedUser.PasswordHash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
+	}
+	if !newPasswordMatches {
+		t.Fatal("stored password hash does not match new password")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after reset: %v", err)
+	}
+	if activeCountAfter != 0 {
+		t.Fatalf("got %d active sessions after reset, want 0", activeCountAfter)
+	}
+}
+
+func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-authenticated-fails@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create active session: %v", err)
+	}
+
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    incorrectPassword,
+		"newPassword": newPassword,
+	}, &sessionCookie)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "authentication failed" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "authentication failed")
+	}
+
+	// NOTE:
+	// response recorder only records cookies added by response
+	// so when server makes no changes we're good to go...
+	assertNoSessionCookie(t, rec)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed password reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after failed password reset")
+	}
+
+	// get session count is active sessions!
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after reset, want 1", activeCountAfter)
+	}
+}
+
+func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-authenticated-weak@example.com"
+	currentPassword := "current-password-12345"
+	commonNewPassword := "123456789101112"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create active session: %v", err)
+	}
+
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    currentPassword,
+		"newPassword": commonNewPassword,
+	}, &sessionCookie)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Password != "password too common" {
+		t.Fatalf("got password error %q, want %q", gotErr.Password, "password too common")
+	}
+
+	assertNoSessionCookie(t, rec)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed password reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after failed password reset")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after reset, want 1", activeCountAfter)
+	}
+}
+
 func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	t.Helper()
 
@@ -582,11 +808,12 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	sessionService := session.NewService(queries)
 
 	return userIntegrationDeps{
-		pool:        pool,
-		queries:     queries,
-		userService: userService,
-		signUp:      handlers.CreateSignUpHandler(userService, sessionService),
-		login:       handlers.CreateLoginHandler(userService, sessionService),
+		pool:           pool,
+		queries:        queries,
+		userService:    userService,
+		sessionService: sessionService,
+		signUp:         handlers.CreateSignUpHandler(userService, sessionService),
+		login:          handlers.CreateLoginHandler(userService, sessionService),
 	}
 }
 

@@ -98,6 +98,7 @@ func CreateAuthenticatedPasswordResetHandler(userService *user.Service) http.Han
 			return
 		}
 
+		// TODO: Make me middleware!
 		usr, err := middleware.UserFromContext(r.Context())
 		if err != nil {
 			if errors.Is(err, middleware.ErrUserNotInContext) {
