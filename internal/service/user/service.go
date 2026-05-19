@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/service/user"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -212,7 +211,7 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 	return nil
 }
 
-func (s *Service) CreatePasswordResetRequest(ctx context.Context, usr user.Service) {
+func (s *Service) CreatePasswordResetRequest(ctx context.Context, usr Service) {
 	// Get user from email.
 	// Ensure no more than 2 email resets per hour
 	// Ensure no more than 1 email reset per 10 minutes.
