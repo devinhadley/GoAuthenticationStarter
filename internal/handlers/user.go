@@ -88,7 +88,7 @@ func CreateLoginHandler(userService *user.Service, sessionService *session.Servi
 
 func CreateAuthenticatedPasswordResetHandler(userService *user.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var reqBody user.PasswordResetBody
+		var reqBody user.AuthenticatedPasswordResetBody
 
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -165,7 +165,7 @@ func writeLogInError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 
-	if errors.Is(err, user.ErrLoginRateLimit) {
+	if errors.Is(err, user.ErrRateLimit) {
 		utils.WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
 		return true
 	}

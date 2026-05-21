@@ -3,6 +3,8 @@ package user
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/email"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -31,12 +34,16 @@ var (
 	ErrPasswordLong       = errors.New("password cannot be empty")
 	ErrPasswordCommon     = errors.New("password is too common")
 	ErrUserNotFound       = errors.New("user not found")
-	ErrLoginRateLimit     = errors.New("too many login attempts for email")
+	ErrRateLimit          = errors.New("too many attempts for action")
 )
 
 const (
-	rateLimitLoginDurationMinutes = 10
-	rateLimitLoginAttemptsAllowed = 10
+	rateLimitLoginDurationMinutes              = 10
+	rateLimitLoginAttemptsAllowed              = 10
+	rateLimitPasswordResetShortDurationMinutes = 15
+	rateLimitPasswordResetLongDurationMinutes  = 120
+	rateLimitPasswordResetShortAllowed         = 2
+	rateLimitPasswordResetLongAllowed          = 3
 )
 
 type UserQueries interface {
@@ -44,7 +51,9 @@ type UserQueries interface {
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
 	GetUserByID(ctx context.Context, id int64) (db.User, error)
 	CountFailedAuthAttemptsSince(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
+	CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
 	CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
+	CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
 	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
 	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
 }
@@ -52,6 +61,7 @@ type UserQueries interface {
 type Service struct {
 	queries         UserQueries
 	commonPasswords commonPasswords
+	emailService    email.Service
 }
 
 type AuthenticateBody struct {
@@ -59,13 +69,17 @@ type AuthenticateBody struct {
 	Password string `json:"password"`
 }
 
-type PasswordResetBody struct {
+type AuthenticatedPasswordResetBody struct {
 	Password    string `json:"password"`
 	NewPassword string `json:"newPassword"`
 }
 
-func NewService(queries UserQueries) *Service {
-	return &Service{queries: queries, commonPasswords: getCommonPasswords()}
+type CreatePasswordResetRequestBody struct {
+	Email string `json:"email"`
+}
+
+func NewService(queries UserQueries, emailService email.Service) *Service {
+	return &Service{queries: queries, emailService: emailService, commonPasswords: getCommonPasswords()}
 }
 
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -128,13 +142,13 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	}
 
 	if isLimited {
-		return User{}, ErrLoginRateLimit
+		return User{}, ErrRateLimit
 	}
 
 	user, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = s.createLoginAttempt(ctx, email, db.AuthOutcomeFailed)
+			err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
 			if err != nil {
 				return User{}, err
 			}
@@ -144,7 +158,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	}
 
 	if !user.IsActive {
-		err = s.createLoginAttempt(ctx, email, db.AuthOutcomeFailed)
+		err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
 		if err != nil {
 			return User{}, err
 		}
@@ -156,14 +170,14 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 		return User{}, fmt.Errorf("validating password hash: %w", err)
 	}
 	if !ok {
-		err = s.createLoginAttempt(ctx, email, db.AuthOutcomeFailed)
+		err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
 		if err != nil {
 			return User{}, err
 		}
 		return User{}, ErrInvalidCredentials
 	}
 
-	err = s.createLoginAttempt(ctx, email, db.AuthOutcomeSucceeded)
+	err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeSucceeded)
 	if err != nil {
 		log.Printf("creating successful auth login attempt: %v", err)
 	}
@@ -171,7 +185,7 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	return UserFromDB(user), nil
 }
 
-func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr User, input PasswordResetBody) error {
+func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr User, input AuthenticatedPasswordResetBody) error {
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
 		return err
@@ -211,19 +225,57 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 	return nil
 }
 
-func (s *Service) CreatePasswordResetRequest(ctx context.Context, usr Service) {
-	// Get user from email.
-	// Ensure no more than 2 email resets per hour
-	// Ensure no more than 1 email reset per 10 minutes.
-	// Use generic error here.
+func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody CreatePasswordResetRequestBody) error {
+	email, ok := normalizeAndValidateEmail(reqBody.Email)
+	if !ok {
+		return ErrInvalidEmail
+	}
 
-	// Generate cryptographically random 128 bit token.
-	// Create record in db.
-	// Construct into url safe query param.
-	// Send link via email.
+	isRateLimited, err := s.isPasswordResetReqRateLimited(ctx, email)
+	if err != nil {
+		return fmt.Errorf("checking if password reset request rate limited: %w", err)
+	}
 
-	// Record the auth attempt.
-	// return 204
+	if isRateLimited {
+		return ErrRateLimit
+	}
+
+	usr, err := s.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Record failed auth attempt.
+			return ErrUserNotFound
+		}
+
+		return fmt.Errorf("getting user by email when creating password reset request: %w", err)
+	}
+
+	resetToken := make([]byte, 16)
+	_, err = rand.Read(resetToken)
+	if err != nil {
+		return fmt.Errorf("generating random bytes for password reset token: %w", err)
+	}
+
+	sum := sha256.Sum256(resetToken)
+	_, err = s.queries.CreatePasswordResetRequest(ctx, db.CreatePasswordResetRequestParams{
+		ID:     sum[:],
+		UserID: usr.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("creating password reset request: %w", err)
+	}
+
+	err = s.emailService.SendMail(email, "Password Reset", "http://example.com/password-reset/?token=")
+	if err != nil {
+		return fmt.Errorf("failed to send passwor reset email: %w", err)
+	}
+
+	err = s.createAuthAttempt(ctx, db.AuthActionPasswordReset, email, db.AuthOutcomeSucceeded)
+	if err != nil {
+		log.Printf("creating auth attempt for reset request: %v", err)
+	}
+
+	return nil
 }
 
 func (s *Service) ResetPasswordFromResetRequest(ctx context.Context) {
@@ -296,9 +348,30 @@ func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, e
 	return loginAttemptsForEmail >= rateLimitLoginAttemptsAllowed, nil
 }
 
-func (s *Service) createLoginAttempt(ctx context.Context, email string, outcome db.AuthOutcome) error {
+func (s *Service) isPasswordResetReqRateLimited(ctx context.Context, email string) (bool, error) {
+	now := time.Now()
+
+	count, err := s.queries.CountAuthAttemptsForPassResetReq(ctx, db.CountAuthAttemptsForPassResetReqParams{
+		RecentDate: pgtype.Timestamptz{
+			Time:  now.Add(-(rateLimitPasswordResetShortDurationMinutes * time.Minute)),
+			Valid: true,
+		},
+		OldDate: pgtype.Timestamptz{
+			Time:  now.Add(-(rateLimitPasswordResetLongDurationMinutes * time.Minute)),
+			Valid: true,
+		},
+		Email: email,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return count.RecentCount >= rateLimitPasswordResetShortAllowed || count.OldCount >= rateLimitPasswordResetLongAllowed, nil
+}
+
+func (s *Service) createAuthAttempt(ctx context.Context, action db.AuthAction, email string, outcome db.AuthOutcome) error {
 	err := s.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
-		Action:  db.AuthActionLogin,
+		Action:  action,
 		Email:   email,
 		Outcome: outcome,
 	})

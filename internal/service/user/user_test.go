@@ -53,8 +53,8 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("authenticated password reset doesn't allow weak pass", testResetPasswordForAuthenticatedUserRejectsWeakPassword)
 	t.Run("can request token password reset", needsImplemented)
 	t.Run("requesting token password reset response for unkown email matches known", needsImplemented)
-	t.Run("cant request more than 3 password resets for a particular email in an hour", needsImplemented)
-	t.Run("cant request more than 1 password resets for a particular email in 10 minutes", needsImplemented)
+	t.Run("cant request more than 3 password resets for a particular email in 120 minutes", needsImplemented)
+	t.Run("cant request more than 2 password resets for a particular email in 15 minutes", needsImplemented)
 	t.Run("can reset password with token", needsImplemented)
 	t.Run("cant reset password with incorrect token", needsImplemented)
 	t.Run("cant reset password with expired token", needsImplemented)
@@ -557,8 +557,8 @@ func testUserLogInRateLimited(t *testing.T) {
 		Password: "example-password",
 	})
 
-	if !errors.Is(err, ErrLoginRateLimit) {
-		t.Fatalf("got error %v, want %v", err, ErrLoginRateLimit)
+	if !errors.Is(err, ErrRateLimit) {
+		t.Fatalf("got error %v, want %v", err, ErrRateLimit)
 	}
 }
 
@@ -702,7 +702,7 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 		},
 	})
 
-	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, PasswordResetBody{
+	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
 		Password:    currentPassword,
 		NewPassword: newPassword,
 	})
@@ -763,7 +763,7 @@ func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
 		},
 	})
 
-	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, PasswordResetBody{
+	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
 		Password:    providedCurrentPassword,
 		NewPassword: newPassword,
 	})
@@ -816,7 +816,7 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 				userService.commonPasswords = commonPasswords{tc.newPassword: struct{}{}}
 			}
 
-			err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, PasswordResetBody{
+			err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
 				Password:    currentPassword,
 				NewPassword: tc.newPassword,
 			})

@@ -9,13 +9,15 @@ import (
 )
 
 type MockUserQueries struct {
-	CreateUserFn                   func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
-	GetUserByEmailFn               func(ctx context.Context, email string) (db.User, error)
-	GetUserByIDFn                  func(ctx context.Context, id int64) (db.User, error)
-	CountFailedAuthAttemptsSinceFn func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
-	CreateLoginAuthAttemptFn       func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
-	UpdatePasswordHashFn           func(ctx context.Context, arg db.UpdatePasswordHashParams) error
-	DeactivateAllSessionsForUserFn func(ctx context.Context, userID int64) error
+	CreateUserFn                       func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
+	GetUserByEmailFn                   func(ctx context.Context, email string) (db.User, error)
+	GetUserByIDFn                      func(ctx context.Context, id int64) (db.User, error)
+	CountFailedAuthAttemptsSinceFn     func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
+	CountAuthAttemptsForPassResetReqFn func(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
+	CreateLoginAuthAttemptFn           func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
+	CreatePasswordResetRequestFn       func(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
+	UpdatePasswordHashFn               func(ctx context.Context, arg db.UpdatePasswordHashParams) error
+	DeactivateAllSessionsForUserFn     func(ctx context.Context, userID int64) error
 }
 
 func (q *MockUserQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
@@ -59,12 +61,28 @@ func (q *MockUserQueries) CountFailedAuthAttemptsSince(ctx context.Context, arg 
 	return 0, nil
 }
 
+func (q *MockUserQueries) CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+	if q.CountAuthAttemptsForPassResetReqFn != nil {
+		return q.CountAuthAttemptsForPassResetReqFn(ctx, arg)
+	}
+
+	return db.CountAuthAttemptsForPassResetReqRow{}, nil
+}
+
 func (q *MockUserQueries) CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
 	if q.CreateLoginAuthAttemptFn != nil {
 		return q.CreateLoginAuthAttemptFn(ctx, arg)
 	}
 
 	return nil
+}
+
+func (q *MockUserQueries) CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+	if q.CreatePasswordResetRequestFn != nil {
+		return q.CreatePasswordResetRequestFn(ctx, arg)
+	}
+
+	return db.PasswordResetRequest{ID: arg.ID, UserID: arg.UserID}, nil
 }
 
 func (q *MockUserQueries) UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/email"
 	"devinhadley/gobootstrapweb/internal/handlers"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
@@ -27,7 +29,15 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	userService := user.NewService(queries)
+	isProd := strings.ToLower(utils.GetEnvOrExit("IS_PROD")) != "false"
+	var mailService email.Service
+	if isProd {
+		log.Fatalf("no production email service configured.")
+	} else {
+		mailService = email.CreateMailHogService()
+	}
+
+	userService := user.NewService(queries, mailService)
 	sessionService := session.NewService(queries)
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
