@@ -56,6 +56,7 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("password reset fails with authenticated user if existing password incorrect", testResetPasswordForAuthenticatedUserWrongCurrentPassword)
 	t.Run("authenticated password reset doesn't allow weak pass", testResetPasswordForAuthenticatedUserRejectsWeakPassword)
 	t.Run("can request token password reset", testCanRequestPasswordReset)
+	t.Run("cant create password reset with malformed email", testCantCreatePasswordResetWithMalformedEmail)
 	t.Run("requesting token password reset response for unkown email", testRequestingTokenPasswordResetForUnknownEmail)
 	t.Run("cant request more than 3 password resets for a particular email in 120 minutes", testCantRequestMoreThanThreePasswordResetsIn120Minutes)
 	t.Run("cant request more than 2 password resets for a particular email in 15 minutes", testCantRequestMoreThanTwoPasswordResetsIn15Minutes)
@@ -934,6 +935,39 @@ func testCanRequestPasswordReset(t *testing.T) {
 	}
 	if !authAttemptCreated {
 		t.Fatal("CreateLoginAuthAttempt was not called")
+	}
+}
+
+func testCantCreatePasswordResetWithMalformedEmail(t *testing.T) {
+	ctx := context.Background()
+
+	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+		CountAuthAttemptsForPassResetReqFn: func(context.Context, db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+			t.Fatal("CountAuthAttemptsForPassResetReq should not be called for malformed email")
+			return db.CountAuthAttemptsForPassResetReqRow{}, nil
+		},
+		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
+			t.Fatal("GetUserByEmail should not be called for malformed email")
+			return db.User{}, nil
+		},
+		CreatePasswordResetRequestFn: func(context.Context, db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+			t.Fatal("CreatePasswordResetRequest should not be called for malformed email")
+			return db.PasswordResetRequest{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(context.Context, db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("CreateLoginAuthAttempt should not be called for malformed email")
+			return nil
+		},
+	}, mocks.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called for malformed email")
+			return nil
+		},
+	}, "http://example.com/password-reset")
+
+	err := userService.CreatePasswordResetRequest(ctx, CreatePasswordResetRequestBody{Email: "not-an-email"})
+	if !errors.Is(err, ErrInvalidEmail) {
+		t.Fatalf("got error %v, want %v", err, ErrInvalidEmail)
 	}
 }
 

@@ -126,6 +126,32 @@ func CreateAuthenticatedPasswordResetHandler(userService *user.Service) http.Han
 	}
 }
 
+func CreatePasswordResetRequestHandler(userService *user.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var reqBody user.CreatePasswordResetRequestBody
+
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		err := decoder.Decode(&reqBody)
+		if err != nil {
+			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			return
+		}
+
+		err = userService.CreatePasswordResetRequest(r.Context(), reqBody)
+		if err != nil {
+			if writeCreatePasswordResetRequestError(w, err) {
+				return
+			}
+
+			utils.WriteAndReportInternalError(w)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func writeSignUpError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrEmailBlank) {
 		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email may not be blank"})
@@ -180,6 +206,25 @@ func writeAuthenticatedPasswordResetError(w http.ResponseWriter, err error) bool
 	}
 
 	if writeWeakPasswordError(w, err) {
+		return true
+	}
+
+	return false
+}
+
+func writeCreatePasswordResetRequestError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, user.ErrInvalidEmail) {
+		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
+		return true
+	}
+
+	if errors.Is(err, user.ErrRateLimit) {
+		utils.WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
+		return true
+	}
+
+	if errors.Is(err, user.ErrUserNotFound) {
+		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
 

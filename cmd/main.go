@@ -44,6 +44,7 @@ func main() {
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
 	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))
+	mux.Handle("POST /password-reset", handlers.CreatePasswordResetRequestHandler(userService))
 
 	http.ListenAndServe(":8080", mux)
 }
