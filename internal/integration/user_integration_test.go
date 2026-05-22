@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/email"
 	"devinhadley/gobootstrapweb/internal/handlers"
 	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
@@ -804,7 +805,7 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	})
 
 	queries := db.New(pool)
-	userService := user.NewService(queries)
+	userService := user.NewService(queries, email.MailHogService{}, user.Config{PasswordResetURL: "http://"})
 	sessionService := session.NewService(queries)
 
 	return userIntegrationDeps{

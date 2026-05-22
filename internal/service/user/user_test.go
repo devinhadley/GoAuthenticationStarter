@@ -51,7 +51,7 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("can reset password when authenticated", testResetPasswordForAuthenticatedUser)
 	t.Run("password reset fails with authenticated user if existing password incorrect", testResetPasswordForAuthenticatedUserWrongCurrentPassword)
 	t.Run("authenticated password reset doesn't allow weak pass", testResetPasswordForAuthenticatedUserRejectsWeakPassword)
-	t.Run("can request token password reset", needsImplemented)
+	t.Run("can request token password reset", testCanRequestPasswordReset)
 	t.Run("requesting token password reset response for unkown email matches known", needsImplemented)
 	t.Run("cant request more than 3 password resets for a particular email in 120 minutes", needsImplemented)
 	t.Run("cant request more than 2 password resets for a particular email in 15 minutes", needsImplemented)
@@ -827,6 +827,111 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 	}
 }
 
+func testCanRequestPasswordReset(t *testing.T) {
+	ctx := context.Background()
+	inputEmail := "user@example.com"
+	userID := int64(42)
+
+	countChecked := false
+	gotUser := false
+	resetRequested := false
+	emailSent := false
+	authAttemptCreated := false
+
+	passwordResetURL := "http://example.com/password-reset"
+	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+			if callCtx != ctx {
+				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+			}
+			if arg.Email != inputEmail {
+				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+			}
+			countChecked = true
+			return db.CountAuthAttemptsForPassResetReqRow{}, nil
+		},
+		GetUserByEmailFn: func(callCtx context.Context, email string) (db.User, error) {
+			if callCtx != ctx {
+				t.Fatal("GetUserByEmail called with unexpected context")
+			}
+			if email != inputEmail {
+				t.Fatalf("GetUserByEmail got email %q, want %q", email, inputEmail)
+			}
+			gotUser = true
+			return db.User{ID: userID, Email: inputEmail, IsActive: true}, nil
+		},
+		CreatePasswordResetRequestFn: func(callCtx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+			if callCtx != ctx {
+				t.Fatal("CreatePasswordResetRequest called with unexpected context")
+			}
+			if arg.UserID != userID {
+				t.Fatalf("CreatePasswordResetRequest got userID %v, want %v", arg.UserID, userID)
+			}
+			if len(arg.ID) != 32 {
+				t.Fatalf("CreatePasswordResetRequest got token hash length %v, want 32", len(arg.ID))
+			}
+			resetRequested = true
+			return db.PasswordResetRequest{ID: arg.ID, UserID: arg.UserID}, nil
+		},
+		CreateLoginAuthAttemptFn: func(callCtx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			if callCtx != ctx {
+				t.Fatal("CreateLoginAuthAttempt called with unexpected context")
+			}
+			if arg.Action != db.AuthActionPasswordReset {
+				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionPasswordReset)
+			}
+			if arg.Email != inputEmail {
+				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, inputEmail)
+			}
+			if arg.Outcome != db.AuthOutcomeSucceeded {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeSucceeded)
+			}
+			authAttemptCreated = true
+			return nil
+		},
+	}, mocks.MockEmailService{
+		SendMailFn: func(toEmail string, subject string, body string) error {
+			prefix := "http://example.com/password-reset/?token="
+
+			if toEmail != inputEmail {
+				t.Fatalf("SendMail got toEmail %q, want %q", toEmail, inputEmail)
+			}
+			if subject != "Password Reset" {
+				t.Fatalf("SendMail got subject %q, want %q", subject, "Password Reset")
+			}
+			if !strings.HasPrefix(body, prefix) {
+				t.Fatalf("SendMail got body %q, want prefix %q", body, prefix)
+			}
+			if len(body) <= len(prefix) {
+				t.Fatalf("SendMail got body %q, want token appended", body)
+			}
+			emailSent = true
+			return nil
+		},
+	}, passwordResetURL)
+
+	err := userService.CreatePasswordResetRequest(ctx, CreatePasswordResetRequestBody{Email: inputEmail})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	if !countChecked {
+		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+	}
+	if !gotUser {
+		t.Fatal("GetUserByEmail was not called")
+	}
+	if !resetRequested {
+		t.Fatal("CreatePasswordResetRequest was not called")
+	}
+	if !emailSent {
+		t.Fatal("SendMail was not called")
+	}
+	if !authAttemptCreated {
+		t.Fatal("CreateLoginAuthAttempt was not called")
+	}
+}
+
 func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 	testCases := []string{
 		"",
@@ -861,7 +966,12 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 
 func setupUserService(t *testing.T, mockedQueries mocks.MockUserQueries) *Service {
 	t.Helper()
-	return NewService(&mockedQueries)
+	return setupUserServiceWithEmail(t, mockedQueries, mocks.MockEmailService{}, "")
+}
+
+func setupUserServiceWithEmail(t *testing.T, mockedQueries mocks.MockUserQueries, mockedEmailService mocks.MockEmailService, passwordResetURL string) *Service {
+	t.Helper()
+	return NewService(&mockedQueries, mockedEmailService, Config{PasswordResetURL: passwordResetURL})
 }
 
 func needsImplemented(t *testing.T) {

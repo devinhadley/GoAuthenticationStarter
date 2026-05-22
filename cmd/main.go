@@ -37,7 +37,9 @@ func main() {
 		mailService = email.CreateMailHogService()
 	}
 
-	userService := user.NewService(queries, mailService)
+	passwordResetURL := utils.GetEnvOrExit("PASSWORD_RESET_URL")
+
+	userService := user.NewService(queries, mailService, user.Config{PasswordResetURL: passwordResetURL})
 	sessionService := session.NewService(queries)
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))

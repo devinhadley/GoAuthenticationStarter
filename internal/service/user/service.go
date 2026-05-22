@@ -62,6 +62,7 @@ type Service struct {
 	queries         UserQueries
 	commonPasswords commonPasswords
 	emailService    email.Service
+	config          Config
 }
 
 type AuthenticateBody struct {
@@ -78,8 +79,16 @@ type CreatePasswordResetRequestBody struct {
 	Email string `json:"email"`
 }
 
-func NewService(queries UserQueries, emailService email.Service) *Service {
-	return &Service{queries: queries, emailService: emailService, commonPasswords: getCommonPasswords()}
+type Config struct {
+	PasswordResetURL string
+}
+
+func NewService(queries UserQueries, emailService email.Service, config Config) *Service {
+	if len(config.PasswordResetURL) > 0 && !strings.HasSuffix(config.PasswordResetURL, "/") {
+		config.PasswordResetURL += "/"
+	}
+
+	return &Service{queries: queries, emailService: emailService, commonPasswords: getCommonPasswords(), config: config}
 }
 
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -265,7 +274,8 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 		return fmt.Errorf("creating password reset request: %w", err)
 	}
 
-	err = s.emailService.SendMail(email, "Password Reset", "http://example.com/password-reset/?token=")
+	urlWithToken := fmt.Sprintf("%v?token=%v", s.config.PasswordResetURL, resetToken)
+	err = s.emailService.SendMail(email, "Password Reset", urlWithToken)
 	if err != nil {
 		return fmt.Errorf("failed to send passwor reset email: %w", err)
 	}

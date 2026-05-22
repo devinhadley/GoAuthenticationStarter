@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/email"
 	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
@@ -735,5 +736,5 @@ func getTestDependencies(t *testing.T) sessionIntegrationTestDependencies {
 
 	queries := db.New(pool)
 
-	return sessionIntegrationTestDependencies{queries: *queries, userService: *user.NewService(queries), sessionService: *session.NewService(queries), pool: pool}
+	return sessionIntegrationTestDependencies{queries: *queries, userService: *user.NewService(queries, email.MailHogService{}, user.Config{PasswordResetURL: "http://example.com/password-reset"}), sessionService: *session.NewService(queries), pool: pool}
 }

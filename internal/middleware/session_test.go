@@ -17,8 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// TODO: Lets make
+
 // NOTE: Integration tests should cover main happy paths of session middleware and reasonable errors.
-// Middleware unit tests here are useful for difficult to produce errors and key regression risks.
+// Middleware unit tests here are useful for difficult to produce errors.
 
 func TestCreateSessionMiddlewareErrorFlows(t *testing.T) {
 	t.Run("rotate session error proceeds as best effort", testRotateSessionErrorProceedsBestEffort)
@@ -42,7 +44,7 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{ID: id, Email: "test@example.com"}, nil
 		},
-	})
+	}, mocks.MockEmailService{}, user.Config{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
@@ -104,7 +106,7 @@ func testExpiredSessionExpireErrorClearsCookie(t *testing.T) {
 	expireErr := errors.New("expire failed")
 	nextCalled := false
 
-	userService := user.NewService(&mocks.MockUserQueries{})
+	userService := user.NewService(&mocks.MockUserQueries{}, mocks.MockEmailService{}, user.Config{})
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
@@ -162,7 +164,7 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{ID: id, Email: "test@example.com"}, nil
 		},
-	})
+	}, mocks.MockEmailService{}, user.Config{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
@@ -209,7 +211,7 @@ func testRotationSuccessUpdatesLastSeenWithRotatedID(t *testing.T) {
 
 	updateLastSeenCalled := false
 
-	userService := user.NewService(&mocks.MockUserQueries{})
+	userService := user.NewService(&mocks.MockUserQueries{}, mocks.MockEmailService{}, user.Config{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
@@ -271,7 +273,7 @@ func TestCreateGetUserFuncCachesUser(t *testing.T) {
 
 			return wantUser, nil
 		},
-	})
+	}, mocks.MockEmailService{}, user.Config{})
 
 	getUser := createGetUserFunc(userID, userService, context.Background())
 
