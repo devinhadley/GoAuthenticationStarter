@@ -16,6 +16,8 @@ type MockUserQueries struct {
 	CountAuthAttemptsForPassResetReqFn func(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
 	CreateLoginAuthAttemptFn           func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
 	CreatePasswordResetRequestFn       func(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
+	GetPasswordResetRequestByIDFn      func(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
+	DeletePasswordResetRequestByIDFn   func(ctx context.Context, id []byte) error
 	UpdatePasswordHashFn               func(ctx context.Context, arg db.UpdatePasswordHashParams) error
 	DeactivateAllSessionsForUserFn     func(ctx context.Context, userID int64) error
 }
@@ -83,6 +85,22 @@ func (q *MockUserQueries) CreatePasswordResetRequest(ctx context.Context, arg db
 	}
 
 	return db.PasswordResetRequest{ID: arg.ID, UserID: arg.UserID}, nil
+}
+
+func (q *MockUserQueries) GetPasswordResetRequestByID(ctx context.Context, id []byte) (db.PasswordResetRequest, error) {
+	if q.GetPasswordResetRequestByIDFn != nil {
+		return q.GetPasswordResetRequestByIDFn(ctx, id)
+	}
+
+	return db.PasswordResetRequest{}, pgx.ErrNoRows
+}
+
+func (q *MockUserQueries) DeletePasswordResetRequestByID(ctx context.Context, id []byte) error {
+	if q.DeletePasswordResetRequestByIDFn != nil {
+		return q.DeletePasswordResetRequestByIDFn(ctx, id)
+	}
+
+	return nil
 }
 
 func (q *MockUserQueries) UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error {

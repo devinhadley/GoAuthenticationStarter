@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -35,6 +36,7 @@ var (
 	ErrPasswordCommon     = errors.New("password is too common")
 	ErrUserNotFound       = errors.New("user not found")
 	ErrRateLimit          = errors.New("too many attempts for action")
+	ErrInvalidResetToken  = errors.New("invalid or expired reset token")
 )
 
 const (
@@ -44,6 +46,7 @@ const (
 	rateLimitPasswordResetLongDurationMinutes  = 120
 	rateLimitPasswordResetShortAllowed         = 2
 	rateLimitPasswordResetLongAllowed          = 3
+	passwordResetTokenDurationMinutes          = 15
 )
 
 type UserQueries interface {
@@ -54,6 +57,8 @@ type UserQueries interface {
 	CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
 	CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
 	CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
+	GetPasswordResetRequestByID(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
+	DeletePasswordResetRequestByID(ctx context.Context, id []byte) error
 	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
 	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
 }
@@ -77,6 +82,11 @@ type AuthenticatedPasswordResetBody struct {
 
 type CreatePasswordResetRequestBody struct {
 	Email string `json:"email"`
+}
+
+type ResetPasswordFromResetRequestBody struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"newPassword"`
 }
 
 type Config struct {
@@ -274,7 +284,8 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 		return fmt.Errorf("creating password reset request: %w", err)
 	}
 
-	urlWithToken := fmt.Sprintf("%v?token=%v", s.config.PasswordResetURL, resetToken)
+	encodedToken := base64.RawURLEncoding.EncodeToString(resetToken)
+	urlWithToken := fmt.Sprintf("%v?token=%v", s.config.PasswordResetURL, encodedToken)
 	err = s.emailService.SendMail(email, "Password Reset", urlWithToken)
 	if err != nil {
 		return fmt.Errorf("failed to send passwor reset email: %w", err)
@@ -288,13 +299,57 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 	return nil
 }
 
-func (s *Service) ResetPasswordFromResetRequest(ctx context.Context) {
-	// Get request from db
-	// Ensure reset request not expired (15 minutes).
-	// return generic error if either fail
-	// if in db update password
-	// deactivate all sessions
-	// return 204
+func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, input ResetPasswordFromResetRequestBody) error {
+	err := s.isValidPassword(input.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	resetToken, err := base64.RawURLEncoding.DecodeString(input.Token)
+	if err != nil {
+		return ErrInvalidResetToken
+	}
+
+	sum := sha256.Sum256(resetToken)
+	resetRequest, err := s.queries.GetPasswordResetRequestByID(ctx, sum[:])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidResetToken
+		}
+
+		return fmt.Errorf("getting password reset request: %w", err)
+	}
+
+	expiresAt := resetRequest.CreatedAt.Time.Add(passwordResetTokenDurationMinutes * time.Minute)
+	if time.Now().After(expiresAt) {
+		return ErrInvalidResetToken
+	}
+
+	newPasswordHash, err := createPasswordHash(input.NewPassword)
+	if err != nil {
+		return fmt.Errorf("hashing password during reset from token: %w", err)
+	}
+
+	// TODO: Make updating hash & deleting password reset request a transaction.
+	err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
+		ID:           resetRequest.UserID,
+		PasswordHash: string(newPasswordHash),
+	})
+	if err != nil {
+		return fmt.Errorf("updating password hash during reset from token: %w", err)
+	}
+
+	err = s.queries.DeletePasswordResetRequestByID(ctx, resetRequest.ID)
+	if err != nil {
+		return fmt.Errorf("deleting password reset request after successful reset: %w", err)
+	}
+
+	err = s.queries.DeactivateAllSessionsForUser(ctx, resetRequest.UserID)
+	if err != nil {
+		log.Printf("deactivating all sessions during reset from token: %v", err)
+	}
+
+	return nil
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {

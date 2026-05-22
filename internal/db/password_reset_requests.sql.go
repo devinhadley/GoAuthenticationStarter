@@ -27,3 +27,26 @@ func (q *Queries) CreatePasswordResetRequest(ctx context.Context, arg CreatePass
 	err := row.Scan(&i.ID, &i.UserID, &i.CreatedAt)
 	return i, err
 }
+
+const deletePasswordResetRequestByID = `-- name: DeletePasswordResetRequestByID :exec
+DELETE FROM password_reset_requests
+WHERE id = $1
+`
+
+func (q *Queries) DeletePasswordResetRequestByID(ctx context.Context, id []byte) error {
+	_, err := q.db.Exec(ctx, deletePasswordResetRequestByID, id)
+	return err
+}
+
+const getPasswordResetRequestByID = `-- name: GetPasswordResetRequestByID :one
+SELECT id, user_id, created_at
+FROM password_reset_requests
+WHERE id = $1
+`
+
+func (q *Queries) GetPasswordResetRequestByID(ctx context.Context, id []byte) (PasswordResetRequest, error) {
+	row := q.db.QueryRow(ctx, getPasswordResetRequestByID, id)
+	var i PasswordResetRequest
+	err := row.Scan(&i.ID, &i.UserID, &i.CreatedAt)
+	return i, err
+}
