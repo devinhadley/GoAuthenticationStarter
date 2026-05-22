@@ -52,9 +52,9 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("password reset fails with authenticated user if existing password incorrect", testResetPasswordForAuthenticatedUserWrongCurrentPassword)
 	t.Run("authenticated password reset doesn't allow weak pass", testResetPasswordForAuthenticatedUserRejectsWeakPassword)
 	t.Run("can request token password reset", testCanRequestPasswordReset)
-	t.Run("requesting token password reset response for unkown email matches known", needsImplemented)
-	t.Run("cant request more than 3 password resets for a particular email in 120 minutes", needsImplemented)
-	t.Run("cant request more than 2 password resets for a particular email in 15 minutes", needsImplemented)
+	t.Run("requesting token password reset response for unkown email", testRequestingTokenPasswordResetForUnknownEmail)
+	t.Run("cant request more than 3 password resets for a particular email in 120 minutes", testCantRequestMoreThanThreePasswordResetsIn120Minutes)
+	t.Run("cant request more than 2 password resets for a particular email in 15 minutes", testCantRequestMoreThanTwoPasswordResetsIn15Minutes)
 	t.Run("can reset password with token", needsImplemented)
 	t.Run("cant reset password with incorrect token", needsImplemented)
 	t.Run("cant reset password with expired token", needsImplemented)
@@ -829,7 +829,8 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 
 func testCanRequestPasswordReset(t *testing.T) {
 	ctx := context.Background()
-	inputEmail := "user@example.com"
+	inputEmail := " User@Example.COM "
+	normalizedEmail := "User@example.com"
 	userID := int64(42)
 
 	countChecked := false
@@ -844,8 +845,8 @@ func testCanRequestPasswordReset(t *testing.T) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
 			}
-			if arg.Email != inputEmail {
-				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+			if arg.Email != normalizedEmail {
+				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, normalizedEmail)
 			}
 			countChecked = true
 			return db.CountAuthAttemptsForPassResetReqRow{}, nil
@@ -854,11 +855,11 @@ func testCanRequestPasswordReset(t *testing.T) {
 			if callCtx != ctx {
 				t.Fatal("GetUserByEmail called with unexpected context")
 			}
-			if email != inputEmail {
-				t.Fatalf("GetUserByEmail got email %q, want %q", email, inputEmail)
+			if email != normalizedEmail {
+				t.Fatalf("GetUserByEmail got email %q, want %q", email, normalizedEmail)
 			}
 			gotUser = true
-			return db.User{ID: userID, Email: inputEmail, IsActive: true}, nil
+			return db.User{ID: userID, Email: normalizedEmail, IsActive: true}, nil
 		},
 		CreatePasswordResetRequestFn: func(callCtx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
@@ -880,8 +881,8 @@ func testCanRequestPasswordReset(t *testing.T) {
 			if arg.Action != db.AuthActionPasswordReset {
 				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionPasswordReset)
 			}
-			if arg.Email != inputEmail {
-				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, inputEmail)
+			if arg.Email != normalizedEmail {
+				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, normalizedEmail)
 			}
 			if arg.Outcome != db.AuthOutcomeSucceeded {
 				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeSucceeded)
@@ -893,8 +894,8 @@ func testCanRequestPasswordReset(t *testing.T) {
 		SendMailFn: func(toEmail string, subject string, body string) error {
 			prefix := "http://example.com/password-reset/?token="
 
-			if toEmail != inputEmail {
-				t.Fatalf("SendMail got toEmail %q, want %q", toEmail, inputEmail)
+			if toEmail != normalizedEmail {
+				t.Fatalf("SendMail got toEmail %q, want %q", toEmail, normalizedEmail)
 			}
 			if subject != "Password Reset" {
 				t.Fatalf("SendMail got subject %q, want %q", subject, "Password Reset")
@@ -929,6 +930,146 @@ func testCanRequestPasswordReset(t *testing.T) {
 	}
 	if !authAttemptCreated {
 		t.Fatal("CreateLoginAuthAttempt was not called")
+	}
+}
+
+func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
+	ctx := context.Background()
+	inputEmail := "user@example.com"
+	rateLimitChecked := false
+
+	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+			if callCtx != ctx {
+				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+			}
+			if arg.Email != inputEmail {
+				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+			}
+			rateLimitChecked = true
+			return db.CountAuthAttemptsForPassResetReqRow{OldCount: 3, RecentCount: 0}, nil
+		},
+		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
+			t.Fatal("GetUserByEmail should not be called for rate limited password reset request")
+			return db.User{}, nil
+		},
+		CreatePasswordResetRequestFn: func(context.Context, db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+			t.Fatal("CreatePasswordResetRequest should not be called for rate limited password reset request")
+			return db.PasswordResetRequest{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(context.Context, db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited password reset request")
+			return nil
+		},
+	}, mocks.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called for rate limited password reset request")
+			return nil
+		},
+	}, "http://example.com/password-reset")
+
+	err := userService.CreatePasswordResetRequest(ctx, CreatePasswordResetRequestBody{Email: inputEmail})
+	if !errors.Is(err, ErrRateLimit) {
+		t.Fatalf("got error %v, want %v", err, ErrRateLimit)
+	}
+
+	if !rateLimitChecked {
+		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+	}
+}
+
+func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
+	ctx := context.Background()
+	inputEmail := "unknown@example.com"
+	rateLimitChecked := false
+
+	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+			if callCtx != ctx {
+				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+			}
+			if arg.Email != inputEmail {
+				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+			}
+			rateLimitChecked = true
+			return db.CountAuthAttemptsForPassResetReqRow{}, nil
+		},
+		GetUserByEmailFn: func(callCtx context.Context, email string) (db.User, error) {
+			if callCtx != ctx {
+				t.Fatal("GetUserByEmail called with unexpected context")
+			}
+			if email != inputEmail {
+				t.Fatalf("GetUserByEmail got email %q, want %q", email, inputEmail)
+			}
+			return db.User{}, pgx.ErrNoRows
+		},
+		CreatePasswordResetRequestFn: func(context.Context, db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+			t.Fatal("CreatePasswordResetRequest should not be called for unknown email")
+			return db.PasswordResetRequest{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(context.Context, db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("CreateLoginAuthAttempt should not be called for unknown email")
+			return nil
+		},
+	}, mocks.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called for unknown email")
+			return nil
+		},
+	}, "http://example.com/password-reset")
+
+	err := userService.CreatePasswordResetRequest(ctx, CreatePasswordResetRequestBody{Email: inputEmail})
+	if !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("got error %v, want %v", err, ErrUserNotFound)
+	}
+
+	if !rateLimitChecked {
+		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+	}
+}
+
+func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
+	ctx := context.Background()
+	inputEmail := "user@example.com"
+	rateLimitChecked := false
+
+	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+			if callCtx != ctx {
+				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+			}
+			if arg.Email != inputEmail {
+				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+			}
+			rateLimitChecked = true
+			return db.CountAuthAttemptsForPassResetReqRow{OldCount: 0, RecentCount: 2}, nil
+		},
+		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
+			t.Fatal("GetUserByEmail should not be called for rate limited password reset request")
+			return db.User{}, nil
+		},
+		CreatePasswordResetRequestFn: func(context.Context, db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+			t.Fatal("CreatePasswordResetRequest should not be called for rate limited password reset request")
+			return db.PasswordResetRequest{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(context.Context, db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited password reset request")
+			return nil
+		},
+	}, mocks.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called for rate limited password reset request")
+			return nil
+		},
+	}, "http://example.com/password-reset")
+
+	err := userService.CreatePasswordResetRequest(ctx, CreatePasswordResetRequestBody{Email: inputEmail})
+	if !errors.Is(err, ErrRateLimit) {
+		t.Fatalf("got error %v, want %v", err, ErrRateLimit)
+	}
+
+	if !rateLimitChecked {
+		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
 	}
 }
 
