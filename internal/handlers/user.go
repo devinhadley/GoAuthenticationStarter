@@ -152,6 +152,34 @@ func CreatePasswordResetRequestHandler(userService *user.Service) http.HandlerFu
 	}
 }
 
+func CreateTokenPasswordResetHandler(userService *user.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := r.URL.Query().Get("token")
+
+		var reqBody user.ResetPasswordFromResetRequestBody
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+
+		err := decoder.Decode(&reqBody)
+		if err != nil {
+			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			return
+		}
+
+		err = userService.ResetPasswordFromResetRequest(r.Context(), token, reqBody)
+		if err != nil {
+			if writeTokenPasswordResetError(w, err) {
+				return
+			}
+
+			utils.WriteAndReportInternalError(w)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 func writeSignUpError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrEmailBlank) {
 		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email may not be blank"})
@@ -225,6 +253,19 @@ func writeCreatePasswordResetRequestError(w http.ResponseWriter, err error) bool
 
 	if errors.Is(err, user.ErrUserNotFound) {
 		w.WriteHeader(http.StatusNoContent)
+		return true
+	}
+
+	return false
+}
+
+func writeTokenPasswordResetError(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, user.ErrInvalidResetToken) {
+		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid or expired reset token"})
+		return true
+	}
+
+	if writeWeakPasswordError(w, err) {
 		return true
 	}
 

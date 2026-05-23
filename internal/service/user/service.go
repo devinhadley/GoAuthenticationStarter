@@ -85,7 +85,6 @@ type CreatePasswordResetRequestBody struct {
 }
 
 type ResetPasswordFromResetRequestBody struct {
-	Token       string `json:"token"`
 	NewPassword string `json:"newPassword"`
 }
 
@@ -299,13 +298,13 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 	return nil
 }
 
-func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, input ResetPasswordFromResetRequestBody) error {
+func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token string, input ResetPasswordFromResetRequestBody) error {
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
 		return err
 	}
 
-	resetToken, err := base64.RawURLEncoding.DecodeString(input.Token)
+	resetToken, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
 		return ErrInvalidResetToken
 	}

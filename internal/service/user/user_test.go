@@ -1178,8 +1178,7 @@ func testCanResetPasswordWithToken(t *testing.T) {
 		},
 	})
 
-	err := userService.ResetPasswordFromResetRequest(ctx, ResetPasswordFromResetRequestBody{
-		Token:       encodedToken,
+	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
 		NewPassword: newPassword,
 	})
 	if err != nil {
@@ -1239,8 +1238,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		},
 	})
 
-	err := userService.ResetPasswordFromResetRequest(ctx, ResetPasswordFromResetRequestBody{
-		Token:       encodedToken,
+	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
 		NewPassword: "brand-new-password",
 	})
 	if !errors.Is(err, ErrInvalidResetToken) {
@@ -1293,8 +1291,7 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 		},
 	})
 
-	err := userService.ResetPasswordFromResetRequest(ctx, ResetPasswordFromResetRequestBody{
-		Token:       encodedToken,
+	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
 		NewPassword: "brand-new-password",
 	})
 	if !errors.Is(err, ErrInvalidResetToken) {

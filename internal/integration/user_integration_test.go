@@ -30,9 +30,11 @@ type userIntegrationDeps struct {
 	queries        *db.Queries
 	userService    *user.Service
 	sessionService *session.Service
+	emailService   *email.SliceEmailService
 	signUp         http.HandlerFunc
 	login          http.HandlerFunc
 	passwordReset  http.HandlerFunc
+	tokenReset     http.HandlerFunc
 }
 
 func TestSignUpIntegration(t *testing.T) {
@@ -64,6 +66,10 @@ func TestLogInIntegration(t *testing.T) {
 }
 
 func TestPasswordResetIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests in short mode")
+	}
+
 	// authenticated password reset.
 	t.Run("password reset succeeds with authenticated user and deactivates sessions", testAuthenticatedPasswordResetSucceeds)
 	t.Run("password reset fails with incorrect password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWrongPassword)
@@ -75,7 +81,7 @@ func TestPasswordResetIntegration(t *testing.T) {
 	t.Run("creating 3 password resets in 15 minutes shows ratelimit error", testCreatingThreePasswordResetsIn15MinutesShowsRateLimitError)
 	t.Run("creating 4 password resets in 2 hours shows ratelimit error", testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError)
 
-	t.Run("password reset suceeds with a valid reset token and deactivates sessions", needsImplemented)
+	t.Run("password reset suceeds with a valid reset token and deactivates sessions", testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions)
 	t.Run("cant reset password with incorrect token", needsImplemented)
 	t.Run("cant reset password with already used token", needsImplemented)
 }
@@ -834,6 +840,23 @@ func testCanCreatePasswordResetRequest(t *testing.T) {
 	if succeededCount != 1 {
 		t.Fatalf("got %d successful auth attempts for user %q, want %d", succeededCount, email, 1)
 	}
+
+	if len(deps.emailService.Emails) != 1 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 1)
+	}
+
+	sentEmail := deps.emailService.Emails[0]
+	if sentEmail.ToEmail != email {
+		t.Fatalf("got sent email to %q, want %q", sentEmail.ToEmail, email)
+	}
+
+	if sentEmail.Subject != "Password Reset" {
+		t.Fatalf("got sent email subject %q, want %q", sentEmail.Subject, "Password Reset")
+	}
+
+	if !strings.Contains(sentEmail.Body, "?token=") {
+		t.Fatalf("expected sent email body to contain token query parameter, got %q", sentEmail.Body)
+	}
 }
 
 func testCreatingPasswordResetRequestForUnknownUserReturns204(t *testing.T) {
@@ -1019,6 +1042,84 @@ func testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError(t *testing.T) {
 	}
 }
 
+func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-valid-token@example.com"
+	currentPassword := "current-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create first active session: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create second active session: %v", err)
+	}
+
+	err = deps.userService.CreatePasswordResetRequest(ctx, user.CreatePasswordResetRequestBody{Email: email})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	if len(deps.emailService.Emails) != 1 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 1)
+	}
+	resetToken := extractTokenFromResetBody(deps.emailService.Emails[0].Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
+	}
+
+	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
+		"newPassword": newPassword,
+	})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	userAfterPassReset, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after token reset: %v", err)
+	}
+
+	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(userAfterPassReset.PasswordHash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
+	}
+	if !newPasswordMatches {
+		t.Fatal("stored password hash does not match new password")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after token reset: %v", err)
+	}
+	if activeCountAfter != 0 {
+		t.Fatalf("got %d active sessions after token reset, want 0", activeCountAfter)
+	}
+
+	rawToken, err := base64.RawURLEncoding.DecodeString(resetToken)
+	if err != nil {
+		t.Fatalf("failed to decode reset token for post-reset verification: %v", err)
+	}
+	tokenHash := sha256.Sum256(rawToken)
+	_, err = deps.queries.GetPasswordResetRequestByID(ctx, tokenHash[:])
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("expected consumed reset token to be deleted, got err: %v", err)
+	}
+}
+
 func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	t.Helper()
 
@@ -1029,7 +1130,8 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	})
 
 	queries := db.New(pool)
-	userService := user.NewService(queries, email.MailHogService{}, user.Config{PasswordResetURL: "http://"})
+	sliceEmailService := &email.SliceEmailService{}
+	userService := user.NewService(queries, sliceEmailService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
 	sessionService := session.NewService(queries)
 
 	return userIntegrationDeps{
@@ -1037,9 +1139,11 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 		queries:        queries,
 		userService:    userService,
 		sessionService: sessionService,
+		emailService:   sliceEmailService,
 		signUp:         handlers.CreateSignUpHandler(userService, sessionService),
 		login:          handlers.CreateLoginHandler(userService, sessionService),
 		passwordReset:  handlers.CreatePasswordResetRequestHandler(userService),
+		tokenReset:     handlers.CreateTokenPasswordResetHandler(userService),
 	}
 }
 
@@ -1194,4 +1298,18 @@ func updatePasswordResetReqCreatedAtForUserID(t *testing.T, pool *pgxpool.Pool, 
 	if tag.RowsAffected() == 0 {
 		t.Fatalf("expected to update password_reset_requests created_at for user %v, updated 0 rows", userID)
 	}
+}
+
+func extractTokenFromResetBody(body string) string {
+	parts := strings.Split(body, "?token=")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	token := strings.TrimSpace(parts[len(parts)-1])
+	if token == "" {
+		return ""
+	}
+
+	return token
 }

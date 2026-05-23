@@ -34,6 +34,17 @@ func (s MailHogService) SendMail(toEmail string, subject string, body string) er
 	return nil
 }
 
-func CreateMailHogService() MailHogService {
-	return MailHogService{}
+type Email struct {
+	ToEmail string
+	Subject string
+	Body    string
+}
+
+type SliceEmailService struct {
+	Emails []Email
+}
+
+func (s *SliceEmailService) SendMail(toEmail string, subject string, body string) error {
+	s.Emails = append(s.Emails, Email{toEmail, subject, body})
+	return nil
 }
