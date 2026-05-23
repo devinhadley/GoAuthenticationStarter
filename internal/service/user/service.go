@@ -298,6 +298,7 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 	return nil
 }
 
+// TODO: Rename me to ResetPasswordFromRequest
 func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token string, input ResetPasswordFromResetRequestBody) error {
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {

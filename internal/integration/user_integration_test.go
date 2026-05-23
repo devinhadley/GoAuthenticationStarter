@@ -77,13 +77,13 @@ func TestPasswordResetIntegration(t *testing.T) {
 
 	// token based password reset.
 	t.Run("can create password reset request", testCanCreatePasswordResetRequest)
-	t.Run("creating password reset request for uknown user returns 204", testCreatingPasswordResetRequestForUnknownUserReturns204)
+	t.Run("creating password reset request for unknown user returns 204", testCreatingPasswordResetRequestForUnknownUserReturns204)
 	t.Run("creating 3 password resets in 15 minutes shows ratelimit error", testCreatingThreePasswordResetsIn15MinutesShowsRateLimitError)
 	t.Run("creating 4 password resets in 2 hours shows ratelimit error", testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError)
 
 	t.Run("password reset suceeds with a valid reset token and deactivates sessions", testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions)
-	t.Run("cant reset password with incorrect token", needsImplemented)
-	t.Run("cant reset password with already used token", needsImplemented)
+	t.Run("cant reset password with incorrect token", testCantResetPasswordWithIncorrectToken)
+	t.Run("cant reset password with already used token", testCantResetPasswordWithAlreadyUsedToken)
 }
 
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
@@ -1117,6 +1117,131 @@ func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testi
 	_, err = deps.queries.GetPasswordResetRequestByID(ctx, tokenHash[:])
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("expected consumed reset token to be deleted, got err: %v", err)
+	}
+}
+
+func testCantResetPasswordWithIncorrectToken(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-incorrect-token@example.com"
+	currentPassword := "current-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create first active session: %v", err)
+	}
+
+	err = deps.userService.CreatePasswordResetRequest(ctx, user.CreatePasswordResetRequestBody{Email: email})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token=incorrect-reset-token", map[string]string{
+		"newPassword": newPassword,
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "invalid or expired reset token" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "invalid or expired reset token")
+	}
+
+	assertNoSessionCookie(t, rec)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed token reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after failed token reset")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after failed token reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after failed token reset, want %d", activeCountAfter, 1)
+	}
+
+	resetRequestCountAfter := countPasswordResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCountAfter != 1 {
+		t.Fatalf("got %d password reset requests after failed token reset, want %d", resetRequestCountAfter, 1)
+	}
+}
+
+func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-used-token@example.com"
+	currentPassword := "current-password-12345"
+	firstNewPassword := "first-new-password-12345"
+	secondNewPassword := "second-new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	err = deps.userService.CreatePasswordResetRequest(ctx, user.CreatePasswordResetRequestBody{Email: email})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	resetToken := extractTokenFromResetBody(deps.emailService.Emails[0].Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
+	}
+
+	err = deps.userService.ResetPasswordFromResetRequest(ctx, resetToken, user.ResetPasswordFromResetRequestBody{
+		NewPassword: firstNewPassword,
+	})
+	if err != nil {
+		t.Fatalf("ResetPasswordFromResetRequest returned error on first use: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create first active session: %v", err)
+	}
+
+	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
+		"newPassword": secondNewPassword,
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "invalid or expired reset token" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "invalid or expired reset token")
+	}
+
+	activeSessionCount, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("got error when getting session count %v", err)
+	}
+
+	if activeSessionCount != 1 {
+		t.Fatalf("got active session count %d, want %d", activeSessionCount, 1)
 	}
 }
 
