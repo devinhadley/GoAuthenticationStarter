@@ -559,8 +559,8 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 		"password": password,
 	})
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
 
 	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)

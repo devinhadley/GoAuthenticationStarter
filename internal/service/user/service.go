@@ -315,8 +315,8 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 	sum := sha256.Sum256(resetToken)
 
 	var userID int64
-	err = s.runWithTx(ctx, func(q UserQueries) error {
-		resetRequest, err := s.queries.ConsumePasswordResetRequest(ctx, sum[:])
+	err = s.runWithTx(ctx, func(qWithTx UserQueries) error {
+		resetRequest, err := qWithTx.ConsumePasswordResetRequest(ctx, sum[:])
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrInvalidResetToken
@@ -327,6 +327,8 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 
 		expiresAt := resetRequest.CreatedAt.Time.Add(passwordResetTokenDurationMinutes * time.Minute)
 		if time.Now().After(expiresAt) {
+			// TODO: Cleanup expired tokens...
+			// Txn aborts so wont be deleted.
 			return ErrInvalidResetToken
 		}
 
@@ -335,7 +337,7 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 			return fmt.Errorf("hashing password during reset from token: %w", err)
 		}
 
-		err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
+		err = qWithTx.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
 			ID:           resetRequest.UserID,
 			PasswordHash: string(newPasswordHash),
 		})
