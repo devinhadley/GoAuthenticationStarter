@@ -44,8 +44,7 @@ func CreateSignUpHandler(userService *user.Service, sessionService *session.Serv
 		}
 		utils.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
 
-		// TODO: should be 204 no content...
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -81,8 +80,7 @@ func CreateLoginHandler(userService *user.Service, sessionService *session.Servi
 		}
 		utils.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
 
-		// TODO: should be 204 no content...
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -205,7 +203,7 @@ func writeSignUpError(w http.ResponseWriter, err error) bool {
 
 func writeLogInError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrInvalidCredentials) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "authentication failed"})
+		utils.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
 		return true
 	}
 
@@ -229,7 +227,7 @@ func writeLogInError(w http.ResponseWriter, err error) bool {
 
 func writeAuthenticatedPasswordResetError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrInvalidCredentials) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "authentication failed"})
+		utils.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
 		return true
 	}
 

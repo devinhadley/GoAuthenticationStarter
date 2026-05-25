@@ -58,8 +58,8 @@ func TestLogInIntegration(t *testing.T) {
 	}
 
 	t.Run("login succeeds with valid credentials and creates session", testSuccessfulLogin)
-	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
-	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
+	t.Run("returns unauthorized when user does not exist", testLogInReturnsUnauthorizedWhenUserDoesNotExist)
+	t.Run("returns unauthorized when password is incorrect and doesnt create session", testLogInReturnsUnauthorizedWhenPasswordIsIncorrect)
 	t.Run("returns 429 when rate limited and doesnt create session / auth attempt", testLogInReturnsTooManyRequestsWhenRateLimited)
 	t.Run("login succeeds when one of ten failed attempts is older than ten minutes", testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow)
 	t.Run("test rejects invalid email", testLogInRejectsInvalidEmail)
@@ -95,8 +95,8 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 	}
 
 	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
 
 	storedUser, err := deps.queries.GetUserByEmail(context.Background(), input["email"])
@@ -142,8 +142,8 @@ func testSignUpDuplicateEmail(t *testing.T) {
 	}
 
 	first := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusOK)
+	if first.Code != http.StatusNoContent {
+		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusNoContent)
 	}
 
 	second := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
@@ -317,8 +317,8 @@ func testSuccessfulLogin(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
 
 	// Session created for the user.
@@ -370,7 +370,7 @@ func testLogInRejectsInvalidEmail(t *testing.T) {
 	assertNoSessionCookie(t, rec)
 }
 
-func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
+func testLogInReturnsUnauthorizedWhenUserDoesNotExist(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	email := "missing@example.com"
 
@@ -379,8 +379,8 @@ func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 
 	gotErr := decodeErrorResponse(t, rec)
@@ -401,7 +401,7 @@ func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 	assertNoSessionCookie(t, rec)
 }
 
-func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
+func testLogInReturnsUnauthorizedWhenPasswordIsIncorrect(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	ctx := context.Background()
 	email := "wrong-password@example.com"
@@ -419,8 +419,8 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 		"password": "incorrect-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 
 	gotErr := decodeErrorResponse(t, rec)
@@ -711,8 +711,8 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 		"newPassword": newPassword,
 	}, &sessionCookie)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 
 	gotErr := decodeErrorResponse(t, rec)
