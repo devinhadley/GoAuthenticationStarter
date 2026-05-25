@@ -1045,8 +1045,23 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 			t.Fatal("CreatePasswordResetRequest should not be called for unknown email")
 			return db.PasswordResetRequest{}, nil
 		},
-		CreateLoginAuthAttemptFn: func(context.Context, db.CreateLoginAuthAttemptParams) error {
-			t.Fatal("CreateLoginAuthAttempt should not be called for unknown email")
+		CreateLoginAuthAttemptFn: func(callCtx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			if callCtx != ctx {
+				t.Fatal("CreateLoginAuthAttempt called with unexpected context")
+			}
+
+			if arg.Action != db.AuthActionPasswordReset {
+				t.Fatalf("got action %v, want %v", arg.Action, db.AuthActionPasswordReset)
+			}
+
+			if arg.Email != inputEmail {
+				t.Fatalf("got email %v, want %v", arg.Email, inputEmail)
+			}
+
+			if arg.Outcome != db.AuthOutcomeFailed {
+				t.Fatalf("got outcome %v, want %v", arg.Outcome, db.AuthOutcomeFailed)
+			}
+
 			return nil
 		},
 	}, mocks.MockEmailService{
@@ -1120,18 +1135,20 @@ func testCanResetPasswordWithToken(t *testing.T) {
 	newPassword := "brand-new-password"
 
 	updated := false
-	deleted := false
+	consumed := false
 	sessionsDeactivated := false
 	var updatedHash string
 
 	userService := setupUserService(t, mocks.MockUserQueries{
-		GetPasswordResetRequestByIDFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
+		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
-				t.Fatal("GetPasswordResetRequestByID called with unexpected context")
+				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
 			}
 			if string(id) != string(tokenHash[:]) {
-				t.Fatalf("GetPasswordResetRequestByID got id %v, want %v", id, tokenHash[:])
+				t.Fatalf("ConsumePasswordResetRequest got id %v, want %v", id, tokenHash[:])
 			}
+
+			consumed = true
 
 			return db.PasswordResetRequest{
 				ID:     tokenHash[:],
@@ -1152,17 +1169,6 @@ func testCanResetPasswordWithToken(t *testing.T) {
 
 			updated = true
 			updatedHash = arg.PasswordHash
-			return nil
-		},
-		DeletePasswordResetRequestByIDFn: func(callCtx context.Context, id []byte) error {
-			if callCtx != ctx {
-				t.Fatal("DeletePasswordResetRequestByID called with unexpected context")
-			}
-			if string(id) != string(tokenHash[:]) {
-				t.Fatalf("DeletePasswordResetRequestByID got id %v, want %v", id, tokenHash[:])
-			}
-
-			deleted = true
 			return nil
 		},
 		DeactivateAllSessionsForUserFn: func(callCtx context.Context, gotUserID int64) error {
@@ -1188,8 +1194,8 @@ func testCanResetPasswordWithToken(t *testing.T) {
 	if !updated {
 		t.Fatal("UpdatePasswordHash was not called")
 	}
-	if !deleted {
-		t.Fatal("DeletePasswordResetRequestByID was not called")
+	if !consumed {
+		t.Fatal("ConsumePasswordResetRequest was not called")
 	}
 	if !sessionsDeactivated {
 		t.Fatal("DeactivateAllSessionsForUser was not called")
@@ -1213,12 +1219,12 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 	queried := false
 
 	userService := setupUserService(t, mocks.MockUserQueries{
-		GetPasswordResetRequestByIDFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
+		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
-				t.Fatal("GetPasswordResetRequestByID called with unexpected context")
+				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
 			}
 			if string(id) != string(tokenHash[:]) {
-				t.Fatalf("GetPasswordResetRequestByID got id %v, want %v", id, tokenHash[:])
+				t.Fatalf("ConsumePasswordResetRequest got id %v, want %v", id, tokenHash[:])
 			}
 
 			queried = true
@@ -1226,10 +1232,6 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		},
 		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 			t.Fatal("UpdatePasswordHash should not be called for incorrect token")
-			return nil
-		},
-		DeletePasswordResetRequestByIDFn: func(context.Context, []byte) error {
-			t.Fatal("DeletePasswordResetRequestByID should not be called for incorrect token")
 			return nil
 		},
 		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
@@ -1246,7 +1248,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 	}
 
 	if !queried {
-		t.Fatal("GetPasswordResetRequestByID was not called")
+		t.Fatal("ConsumePasswordResetRequest was not called")
 	}
 }
 
@@ -1259,12 +1261,12 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 	queried := false
 
 	userService := setupUserService(t, mocks.MockUserQueries{
-		GetPasswordResetRequestByIDFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
+		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
-				t.Fatal("GetPasswordResetRequestByID called with unexpected context")
+				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
 			}
 			if string(id) != string(tokenHash[:]) {
-				t.Fatalf("GetPasswordResetRequestByID got id %v, want %v", id, tokenHash[:])
+				t.Fatalf("ConsumePasswordResetRequest got id %v, want %v", id, tokenHash[:])
 			}
 
 			queried = true
@@ -1281,10 +1283,6 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 			t.Fatal("UpdatePasswordHash should not be called for expired token")
 			return nil
 		},
-		DeletePasswordResetRequestByIDFn: func(context.Context, []byte) error {
-			t.Fatal("DeletePasswordResetRequestByID should not be called for expired token")
-			return nil
-		},
 		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
 			t.Fatal("DeactivateAllSessionsForUser should not be called for expired token")
 			return nil
@@ -1299,7 +1297,7 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 	}
 
 	if !queried {
-		t.Fatal("GetPasswordResetRequestByID was not called")
+		t.Fatal("ConsumePasswordResetRequest was not called")
 	}
 }
 
@@ -1342,7 +1340,11 @@ func setupUserService(t *testing.T, mockedQueries mocks.MockUserQueries) *Servic
 
 func setupUserServiceWithEmail(t *testing.T, mockedQueries mocks.MockUserQueries, mockedEmailService mocks.MockEmailService, passwordResetURL string) *Service {
 	t.Helper()
-	return NewService(&mockedQueries, mockedEmailService, Config{PasswordResetURL: passwordResetURL})
+	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
+		return fn(&mockedQueries)
+	}
+
+	return NewService(&mockedQueries, runWithTx, mockedEmailService, Config{PasswordResetURL: passwordResetURL})
 }
 
 func needsImplemented(t *testing.T) {

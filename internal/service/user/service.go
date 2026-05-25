@@ -57,14 +57,14 @@ type UserQueries interface {
 	CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
 	CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
 	CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
-	GetPasswordResetRequestByID(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
-	DeletePasswordResetRequestByID(ctx context.Context, id []byte) error
+	ConsumePasswordResetRequest(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
 	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
 	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
 }
 
 type Service struct {
 	queries         UserQueries
+	runWithTx       RunUserQueriesInTxFn
 	commonPasswords commonPasswords
 	emailService    email.Service
 	config          Config
@@ -92,12 +92,12 @@ type Config struct {
 	PasswordResetURL string
 }
 
-func NewService(queries UserQueries, emailService email.Service, config Config) *Service {
+func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, config Config) *Service {
 	if len(config.PasswordResetURL) > 0 && !strings.HasSuffix(config.PasswordResetURL, "/") {
 		config.PasswordResetURL += "/"
 	}
 
-	return &Service{queries: queries, emailService: emailService, commonPasswords: getCommonPasswords(), config: config}
+	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, commonPasswords: getCommonPasswords(), config: config}
 }
 
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -261,7 +261,10 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 	usr, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Record failed auth attempt.
+			err = s.createAuthAttempt(ctx, db.AuthActionPasswordReset, email, db.AuthOutcomeFailed)
+			if err != nil {
+				log.Printf("creating auth attempt for reset request: %v", err)
+			}
 			return ErrUserNotFound
 		}
 
@@ -311,40 +314,44 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 	}
 
 	sum := sha256.Sum256(resetToken)
-	resetRequest, err := s.queries.GetPasswordResetRequestByID(ctx, sum[:])
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+
+	var userID int64
+	err = s.runWithTx(ctx, func(q UserQueries) error {
+		resetRequest, err := s.queries.ConsumePasswordResetRequest(ctx, sum[:])
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrInvalidResetToken
+			}
+
+			return fmt.Errorf("consuming password reset request: %w", err)
+		}
+
+		expiresAt := resetRequest.CreatedAt.Time.Add(passwordResetTokenDurationMinutes * time.Minute)
+		if time.Now().After(expiresAt) {
 			return ErrInvalidResetToken
 		}
 
-		return fmt.Errorf("getting password reset request: %w", err)
-	}
+		newPasswordHash, err := createPasswordHash(input.NewPassword)
+		if err != nil {
+			return fmt.Errorf("hashing password during reset from token: %w", err)
+		}
 
-	expiresAt := resetRequest.CreatedAt.Time.Add(passwordResetTokenDurationMinutes * time.Minute)
-	if time.Now().After(expiresAt) {
-		return ErrInvalidResetToken
-	}
+		err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
+			ID:           resetRequest.UserID,
+			PasswordHash: string(newPasswordHash),
+		})
+		if err != nil {
+			return fmt.Errorf("updating password hash during reset from token: %w", err)
+		}
 
-	newPasswordHash, err := createPasswordHash(input.NewPassword)
-	if err != nil {
-		return fmt.Errorf("hashing password during reset from token: %w", err)
-	}
-
-	// TODO: Make updating hash & deleting password reset request a transaction.
-	err = s.queries.UpdatePasswordHash(ctx, db.UpdatePasswordHashParams{
-		ID:           resetRequest.UserID,
-		PasswordHash: string(newPasswordHash),
+		userID = resetRequest.UserID
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("updating password hash during reset from token: %w", err)
+		return err
 	}
 
-	err = s.queries.DeletePasswordResetRequestByID(ctx, resetRequest.ID)
-	if err != nil {
-		return fmt.Errorf("deleting password reset request after successful reset: %w", err)
-	}
-
-	err = s.queries.DeactivateAllSessionsForUser(ctx, resetRequest.UserID)
+	err = s.queries.DeactivateAllSessionsForUser(ctx, userID)
 	if err != nil {
 		log.Printf("deactivating all sessions during reset from token: %v", err)
 	}

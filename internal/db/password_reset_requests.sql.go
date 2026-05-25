@@ -9,6 +9,19 @@ import (
 	"context"
 )
 
+const consumePasswordResetRequest = `-- name: ConsumePasswordResetRequest :one
+DELETE FROM password_reset_requests
+WHERE id = $1
+RETURNING id, user_id, created_at
+`
+
+func (q *Queries) ConsumePasswordResetRequest(ctx context.Context, id []byte) (PasswordResetRequest, error) {
+	row := q.db.QueryRow(ctx, consumePasswordResetRequest, id)
+	var i PasswordResetRequest
+	err := row.Scan(&i.ID, &i.UserID, &i.CreatedAt)
+	return i, err
+}
+
 const createPasswordResetRequest = `-- name: CreatePasswordResetRequest :one
 INSERT INTO password_reset_requests (
   id, user_id
@@ -23,29 +36,6 @@ type CreatePasswordResetRequestParams struct {
 
 func (q *Queries) CreatePasswordResetRequest(ctx context.Context, arg CreatePasswordResetRequestParams) (PasswordResetRequest, error) {
 	row := q.db.QueryRow(ctx, createPasswordResetRequest, arg.ID, arg.UserID)
-	var i PasswordResetRequest
-	err := row.Scan(&i.ID, &i.UserID, &i.CreatedAt)
-	return i, err
-}
-
-const deletePasswordResetRequestByID = `-- name: DeletePasswordResetRequestByID :exec
-DELETE FROM password_reset_requests
-WHERE id = $1
-`
-
-func (q *Queries) DeletePasswordResetRequestByID(ctx context.Context, id []byte) error {
-	_, err := q.db.Exec(ctx, deletePasswordResetRequestByID, id)
-	return err
-}
-
-const getPasswordResetRequestByID = `-- name: GetPasswordResetRequestByID :one
-SELECT id, user_id, created_at
-FROM password_reset_requests
-WHERE id = $1
-`
-
-func (q *Queries) GetPasswordResetRequestByID(ctx context.Context, id []byte) (PasswordResetRequest, error) {
-	row := q.db.QueryRow(ctx, getPasswordResetRequestByID, id)
 	var i PasswordResetRequest
 	err := row.Scan(&i.ID, &i.UserID, &i.CreatedAt)
 	return i, err

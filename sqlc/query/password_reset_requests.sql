@@ -4,11 +4,7 @@ INSERT INTO password_reset_requests (
 ) VALUES ( $1, $2 )
 RETURNING *;
 
--- name: GetPasswordResetRequestByID :one
-SELECT *
-FROM password_reset_requests
-WHERE id = $1;
-
--- name: DeletePasswordResetRequestByID :exec
+-- name: ConsumePasswordResetRequest :one
 DELETE FROM password_reset_requests
-WHERE id = $1;
+WHERE id = $1
+RETURNING *;

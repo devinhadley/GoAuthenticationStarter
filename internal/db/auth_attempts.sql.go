@@ -18,7 +18,6 @@ SELECT
 FROM auth_attempts
 WHERE action = 'password_reset'
   AND email = $2
-  AND outcome = 'succeeded'
   AND created_at >= $3
 `
 

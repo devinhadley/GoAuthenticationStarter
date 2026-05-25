@@ -878,8 +878,8 @@ func testCreatingPasswordResetRequestForUnknownUserReturns204(t *testing.T) {
 	}
 
 	attemptCount := countAuthAttemptsByEmail(t, deps.pool, email)
-	if attemptCount != 0 {
-		t.Fatalf("got %d auth attempts for email %q, want 0", attemptCount, email)
+	if attemptCount != 1 {
+		t.Fatalf("got %d auth attempts for email %q, want 1", attemptCount, email)
 	}
 }
 
@@ -1114,7 +1114,7 @@ func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testi
 		t.Fatalf("failed to decode reset token for post-reset verification: %v", err)
 	}
 	tokenHash := sha256.Sum256(rawToken)
-	_, err = deps.queries.GetPasswordResetRequestByID(ctx, tokenHash[:])
+	_, err = deps.queries.ConsumePasswordResetRequest(ctx, tokenHash[:])
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("expected consumed reset token to be deleted, got err: %v", err)
 	}
@@ -1256,7 +1256,8 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 
 	queries := db.New(pool)
 	sliceEmailService := &email.SliceEmailService{}
-	userService := user.NewService(queries, sliceEmailService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
+	txnGenerator := user.CreateUserServiceTxnGenerator(pool, queries)
+	userService := user.NewService(queries, txnGenerator, sliceEmailService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
 	sessionService := session.NewService(queries)
 
 	return userIntegrationDeps{

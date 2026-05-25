@@ -18,5 +18,4 @@ SELECT
 FROM auth_attempts
 WHERE action = 'password_reset'
   AND email = sqlc.arg(email)
-  AND outcome = 'succeeded'
   AND created_at >= sqlc.arg(old_date); -- long entries range will include short entries...
