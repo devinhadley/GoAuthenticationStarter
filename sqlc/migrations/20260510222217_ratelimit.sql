@@ -2,7 +2,6 @@
 CREATE TYPE auth_action AS ENUM ('login', 'password_reset', 'email_reset');
 CREATE TYPE auth_outcome AS ENUM ('succeeded', 'failed');
 
--- TODO: Add a primary key column to auth_attempts (for example, id BIGSERIAL PRIMARY KEY).
 CREATE TABLE auth_attempts (
   id BIGSERIAL PRIMARY KEY,
   action auth_action NOT NULL,
@@ -12,11 +11,9 @@ CREATE TABLE auth_attempts (
 );
 
 CREATE INDEX idx_auth_attempts_action_email_created_at
-ON auth_attempts(action, email, created_at)
-WHERE outcome = 'failed';
+ON auth_attempts(action, email, created_at);
 
 -- +goose Down
-
 DROP TABLE IF EXISTS auth_attempts;
 DROP TYPE IF EXISTS auth_outcome;
 DROP TYPE IF EXISTS auth_action;

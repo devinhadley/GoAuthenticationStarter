@@ -3,6 +3,8 @@ package integration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,7 +14,9 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/email"
 	"devinhadley/gobootstrapweb/internal/handlers"
+	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 
@@ -22,11 +26,15 @@ import (
 )
 
 type userIntegrationDeps struct {
-	pool        *pgxpool.Pool
-	queries     *db.Queries
-	userService *user.Service
-	signUp      http.HandlerFunc
-	login       http.HandlerFunc
+	pool           *pgxpool.Pool
+	queries        *db.Queries
+	userService    *user.Service
+	sessionService *session.Service
+	emailService   *email.SliceEmailService
+	signUp         http.HandlerFunc
+	login          http.HandlerFunc
+	passwordReset  http.HandlerFunc
+	tokenReset     http.HandlerFunc
 }
 
 func TestSignUpIntegration(t *testing.T) {
@@ -50,11 +58,32 @@ func TestLogInIntegration(t *testing.T) {
 	}
 
 	t.Run("login succeeds with valid credentials and creates session", testSuccessfulLogin)
-	t.Run("returns bad request when user does not exist", testLogInReturnsBadRequestWhenUserDoesNotExist)
-	t.Run("returns bad request when password is incorrect and doesnt create session", testLogInReturnsBadRequestWhenPasswordIsIncorrect)
+	t.Run("returns unauthorized when user does not exist", testLogInReturnsUnauthorizedWhenUserDoesNotExist)
+	t.Run("returns unauthorized when password is incorrect and doesnt create session", testLogInReturnsUnauthorizedWhenPasswordIsIncorrect)
 	t.Run("returns 429 when rate limited and doesnt create session / auth attempt", testLogInReturnsTooManyRequestsWhenRateLimited)
 	t.Run("login succeeds when one of ten failed attempts is older than ten minutes", testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow)
 	t.Run("test rejects invalid email", testLogInRejectsInvalidEmail)
+}
+
+func TestPasswordResetIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests in short mode")
+	}
+
+	// authenticated password reset.
+	t.Run("password reset succeeds with authenticated user and deactivates sessions", testAuthenticatedPasswordResetSucceeds)
+	t.Run("password reset fails with incorrect password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWrongPassword)
+	t.Run("password reset fails with weak password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWeakPassword)
+
+	// token based password reset.
+	t.Run("can create password reset request", testCanCreatePasswordResetRequest)
+	t.Run("creating password reset request for unknown user returns 204", testCreatingPasswordResetRequestForUnknownUserReturns204)
+	t.Run("creating 3 password resets in 15 minutes shows ratelimit error", testCreatingThreePasswordResetsIn15MinutesShowsRateLimitError)
+	t.Run("creating 4 password resets in 2 hours shows ratelimit error", testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError)
+
+	t.Run("password reset suceeds with a valid reset token and deactivates sessions", testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions)
+	t.Run("cant reset password with incorrect token", testCantResetPasswordWithIncorrectToken)
+	t.Run("cant reset password with already used token", testCantResetPasswordWithAlreadyUsedToken)
 }
 
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
@@ -66,8 +95,8 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 	}
 
 	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
 
 	storedUser, err := deps.queries.GetUserByEmail(context.Background(), input["email"])
@@ -113,8 +142,8 @@ func testSignUpDuplicateEmail(t *testing.T) {
 	}
 
 	first := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusOK)
+	if first.Code != http.StatusNoContent {
+		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusNoContent)
 	}
 
 	second := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
@@ -288,8 +317,8 @@ func testSuccessfulLogin(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
 
 	// Session created for the user.
@@ -341,7 +370,7 @@ func testLogInRejectsInvalidEmail(t *testing.T) {
 	assertNoSessionCookie(t, rec)
 }
 
-func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
+func testLogInReturnsUnauthorizedWhenUserDoesNotExist(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	email := "missing@example.com"
 
@@ -350,8 +379,8 @@ func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 
 	gotErr := decodeErrorResponse(t, rec)
@@ -372,7 +401,7 @@ func testLogInReturnsBadRequestWhenUserDoesNotExist(t *testing.T) {
 	assertNoSessionCookie(t, rec)
 }
 
-func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
+func testLogInReturnsUnauthorizedWhenPasswordIsIncorrect(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	ctx := context.Background()
 	email := "wrong-password@example.com"
@@ -390,8 +419,8 @@ func testLogInReturnsBadRequestWhenPasswordIsIncorrect(t *testing.T) {
 		"password": "incorrect-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 
 	gotErr := decodeErrorResponse(t, rec)
@@ -530,8 +559,8 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 		"password": password,
 	})
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
 
 	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
@@ -561,6 +590,661 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 	assertSessionCookieExists(t, rec)
 }
 
+func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-authenticated@example.com"
+	currentPassword := "current-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	var requestSession session.Session
+	for range 3 {
+		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser)
+		if err != nil {
+			t.Fatalf("failed to create active session: %v", err)
+		}
+	}
+
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    currentPassword,
+		"newPassword": newPassword,
+	}, &sessionCookie)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	foundClearedCookie := false
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == "id" {
+			foundClearedCookie = true
+			if cookie.Value != "" {
+				t.Fatalf("expected cleared session cookie value, got %q", cookie.Value)
+			}
+			if cookie.MaxAge != -1 {
+				t.Fatalf("expected cleared session cookie max age -1, got %d", cookie.MaxAge)
+			}
+		}
+	}
+
+	if !foundClearedCookie {
+		t.Fatal("expected handler to clear session cookie")
+	}
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after password reset: %v", err)
+	}
+
+	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(storedUser.PasswordHash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
+	}
+	if !newPasswordMatches {
+		t.Fatal("stored password hash does not match new password")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after reset: %v", err)
+	}
+	if activeCountAfter != 0 {
+		t.Fatalf("got %d active sessions after reset, want 0", activeCountAfter)
+	}
+}
+
+func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-authenticated-fails@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create active session: %v", err)
+	}
+
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    incorrectPassword,
+		"newPassword": newPassword,
+	}, &sessionCookie)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "authentication failed" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "authentication failed")
+	}
+
+	// NOTE:
+	// response recorder only records cookies added by response
+	// so when server makes no changes we're good to go...
+	assertNoSessionCookie(t, rec)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed password reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after failed password reset")
+	}
+
+	// get session count is active sessions!
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after reset, want 1", activeCountAfter)
+	}
+}
+
+func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-authenticated-weak@example.com"
+	currentPassword := "current-password-12345"
+	commonNewPassword := "123456789101112"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create active session: %v", err)
+	}
+
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    currentPassword,
+		"newPassword": commonNewPassword,
+	}, &sessionCookie)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Password != "password too common" {
+		t.Fatalf("got password error %q, want %q", gotErr.Password, "password too common")
+	}
+
+	assertNoSessionCookie(t, rec)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed password reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after failed password reset")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after reset, want 1", activeCountAfter)
+	}
+}
+
+func testCanCreatePasswordResetRequest(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-request@example.com"
+	password := "original-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+		"email": email,
+	})
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	resetRequestCount := countPasswordResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 1 {
+		t.Fatalf("got %d password reset requests for user %v, want %d", resetRequestCount, createdUser.DBUser().ID, 1)
+	}
+
+	succeededCount := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeSucceeded)
+	if succeededCount != 1 {
+		t.Fatalf("got %d successful auth attempts for user %q, want %d", succeededCount, email, 1)
+	}
+
+	if len(deps.emailService.Emails) != 1 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 1)
+	}
+
+	sentEmail := deps.emailService.Emails[0]
+	if sentEmail.ToEmail != email {
+		t.Fatalf("got sent email to %q, want %q", sentEmail.ToEmail, email)
+	}
+
+	if sentEmail.Subject != "Password Reset" {
+		t.Fatalf("got sent email subject %q, want %q", sentEmail.Subject, "Password Reset")
+	}
+
+	if !strings.Contains(sentEmail.Body, "?token=") {
+		t.Fatalf("expected sent email body to contain token query parameter, got %q", sentEmail.Body)
+	}
+}
+
+func testCreatingPasswordResetRequestForUnknownUserReturns204(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+
+	email := "missing-password-reset@example.com"
+
+	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+		"email": email,
+	})
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	resetRequestCount := countPasswordResetRequests(t, deps.pool)
+	if resetRequestCount != 0 {
+		t.Fatalf("got %d password reset requests, want 0", resetRequestCount)
+	}
+
+	attemptCount := countAuthAttemptsByEmail(t, deps.pool, email)
+	if attemptCount != 1 {
+		t.Fatalf("got %d auth attempts for email %q, want 1", attemptCount, email)
+	}
+}
+
+func testCreatingThreePasswordResetsIn15MinutesShowsRateLimitError(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-rate-limit-short@example.com"
+	password := "original-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	firstSeedID := sha256.Sum256([]byte("seeded-reset-request-1"))
+	secondSeedID := sha256.Sum256([]byte("seeded-reset-request-2"))
+
+	_, err = deps.queries.CreatePasswordResetRequest(ctx, db.CreatePasswordResetRequestParams{ID: firstSeedID[:], UserID: createdUser.DBUser().ID})
+	if err != nil {
+		t.Fatalf("failed to seed first password reset request: %v", err)
+	}
+
+	_, err = deps.queries.CreatePasswordResetRequest(ctx, db.CreatePasswordResetRequestParams{ID: secondSeedID[:], UserID: createdUser.DBUser().ID})
+	if err != nil {
+		t.Fatalf("failed to seed second password reset request: %v", err)
+	}
+
+	err = deps.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+		Action:  db.AuthActionPasswordReset,
+		Email:   email,
+		Outcome: db.AuthOutcomeSucceeded,
+	})
+	if err != nil {
+		t.Fatalf("failed to seed first successful password reset auth attempt: %v", err)
+	}
+
+	err = deps.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+		Action:  db.AuthActionPasswordReset,
+		Email:   email,
+		Outcome: db.AuthOutcomeSucceeded,
+	})
+	if err != nil {
+		t.Fatalf("failed to seed second successful password reset auth attempt: %v", err)
+	}
+
+	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+		"email": email,
+	})
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "try again later" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
+	}
+
+	resetRequestCount := countPasswordResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 2 {
+		t.Fatalf("got %d password reset requests for user %v, want %d", resetRequestCount, createdUser.DBUser().ID, 2)
+	}
+
+	attemptCount := countAuthAttemptsByEmail(t, deps.pool, email)
+	if attemptCount != 2 {
+		t.Fatalf("got %d auth attempts for email %q, want %d", attemptCount, email, 2)
+	}
+}
+
+func testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-rate-limit-long@example.com"
+	password := "original-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	firstSeedID := sha256.Sum256([]byte("seeded-reset-request-long-1"))
+	secondSeedID := sha256.Sum256([]byte("seeded-reset-request-long-2"))
+	thirdSeedID := sha256.Sum256([]byte("seeded-reset-request-long-3"))
+
+	_, err = deps.queries.CreatePasswordResetRequest(ctx, db.CreatePasswordResetRequestParams{ID: firstSeedID[:], UserID: createdUser.DBUser().ID})
+	if err != nil {
+		t.Fatalf("failed to seed first password reset request: %v", err)
+	}
+
+	_, err = deps.queries.CreatePasswordResetRequest(ctx, db.CreatePasswordResetRequestParams{ID: secondSeedID[:], UserID: createdUser.DBUser().ID})
+	if err != nil {
+		t.Fatalf("failed to seed second password reset request: %v", err)
+	}
+
+	_, err = deps.queries.CreatePasswordResetRequest(ctx, db.CreatePasswordResetRequestParams{ID: thirdSeedID[:], UserID: createdUser.DBUser().ID})
+	if err != nil {
+		t.Fatalf("failed to seed third password reset request: %v", err)
+	}
+
+	err = deps.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+		Action:  db.AuthActionPasswordReset,
+		Email:   email,
+		Outcome: db.AuthOutcomeSucceeded,
+	})
+	if err != nil {
+		t.Fatalf("failed to seed first successful password reset auth attempt: %v", err)
+	}
+
+	err = deps.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+		Action:  db.AuthActionPasswordReset,
+		Email:   email,
+		Outcome: db.AuthOutcomeSucceeded,
+	})
+	if err != nil {
+		t.Fatalf("failed to seed second successful password reset auth attempt: %v", err)
+	}
+
+	err = deps.queries.CreateLoginAuthAttempt(ctx, db.CreateLoginAuthAttemptParams{
+		Action:  db.AuthActionPasswordReset,
+		Email:   email,
+		Outcome: db.AuthOutcomeSucceeded,
+	})
+	if err != nil {
+		t.Fatalf("failed to seed third successful password reset auth attempt: %v", err)
+	}
+
+	seededCreatedAt := time.Now().Add(-20 * time.Minute)
+	updateAuthAttemptsCreatedAtForEmailAndActionAndOutcome(t, deps.pool, email, db.AuthActionPasswordReset, db.AuthOutcomeSucceeded, seededCreatedAt)
+	updatePasswordResetReqCreatedAtForUserID(t, deps.pool, createdUser.DBUser().ID, seededCreatedAt)
+
+	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+		"email": email,
+	})
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "try again later" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
+	}
+
+	resetRequestCount := countPasswordResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 3 {
+		t.Fatalf("got %d password reset requests for user %v, want %d", resetRequestCount, createdUser.DBUser().ID, 3)
+	}
+
+	attemptCount := countAuthAttemptsByEmail(t, deps.pool, email)
+	if attemptCount != 3 {
+		t.Fatalf("got %d auth attempts for email %q, want %d", attemptCount, email, 3)
+	}
+}
+
+func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-valid-token@example.com"
+	currentPassword := "current-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create first active session: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create second active session: %v", err)
+	}
+
+	err = deps.userService.CreatePasswordResetRequest(ctx, user.CreatePasswordResetRequestBody{Email: email})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	if len(deps.emailService.Emails) != 1 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 1)
+	}
+	resetToken := extractTokenFromResetBody(deps.emailService.Emails[0].Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
+	}
+
+	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
+		"newPassword": newPassword,
+	})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	userAfterPassReset, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after token reset: %v", err)
+	}
+
+	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(userAfterPassReset.PasswordHash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
+	}
+	if !newPasswordMatches {
+		t.Fatal("stored password hash does not match new password")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after token reset: %v", err)
+	}
+	if activeCountAfter != 0 {
+		t.Fatalf("got %d active sessions after token reset, want 0", activeCountAfter)
+	}
+
+	rawToken, err := base64.RawURLEncoding.DecodeString(resetToken)
+	if err != nil {
+		t.Fatalf("failed to decode reset token for post-reset verification: %v", err)
+	}
+	tokenHash := sha256.Sum256(rawToken)
+	_, err = deps.queries.ConsumePasswordResetRequest(ctx, tokenHash[:])
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("expected consumed reset token to be deleted, got err: %v", err)
+	}
+}
+
+func testCantResetPasswordWithIncorrectToken(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-incorrect-token@example.com"
+	currentPassword := "current-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create first active session: %v", err)
+	}
+
+	err = deps.userService.CreatePasswordResetRequest(ctx, user.CreatePasswordResetRequestBody{Email: email})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token=incorrect-reset-token", map[string]string{
+		"newPassword": newPassword,
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "invalid or expired reset token" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "invalid or expired reset token")
+	}
+
+	assertNoSessionCookie(t, rec)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed token reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after failed token reset")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after failed token reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after failed token reset, want %d", activeCountAfter, 1)
+	}
+
+	resetRequestCountAfter := countPasswordResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCountAfter != 1 {
+		t.Fatalf("got %d password reset requests after failed token reset, want %d", resetRequestCountAfter, 1)
+	}
+}
+
+func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-used-token@example.com"
+	currentPassword := "current-password-12345"
+	firstNewPassword := "first-new-password-12345"
+	secondNewPassword := "second-new-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    email,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	err = deps.userService.CreatePasswordResetRequest(ctx, user.CreatePasswordResetRequestBody{Email: email})
+	if err != nil {
+		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
+	}
+
+	resetToken := extractTokenFromResetBody(deps.emailService.Emails[0].Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
+	}
+
+	err = deps.userService.ResetPasswordFromResetRequest(ctx, resetToken, user.ResetPasswordFromResetRequestBody{
+		NewPassword: firstNewPassword,
+	})
+	if err != nil {
+		t.Fatalf("ResetPasswordFromResetRequest returned error on first use: %v", err)
+	}
+
+	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	if err != nil {
+		t.Fatalf("failed to create first active session: %v", err)
+	}
+
+	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
+		"newPassword": secondNewPassword,
+	})
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "invalid or expired reset token" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "invalid or expired reset token")
+	}
+
+	activeSessionCount, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("got error when getting session count %v", err)
+	}
+
+	if activeSessionCount != 1 {
+		t.Fatalf("got active session count %d, want %d", activeSessionCount, 1)
+	}
+}
+
 func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	t.Helper()
 
@@ -571,15 +1255,21 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	})
 
 	queries := db.New(pool)
-	userService := user.NewService(queries)
+	sliceEmailService := &email.SliceEmailService{}
+	txnGenerator := user.CreateUserServiceTxnGenerator(pool, queries)
+	userService := user.NewService(queries, txnGenerator, sliceEmailService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
 	sessionService := session.NewService(queries)
 
 	return userIntegrationDeps{
-		pool:        pool,
-		queries:     queries,
-		userService: userService,
-		signUp:      handlers.CreateSignUpHandler(userService, sessionService),
-		login:       handlers.CreateLoginHandler(userService, sessionService),
+		pool:           pool,
+		queries:        queries,
+		userService:    userService,
+		sessionService: sessionService,
+		emailService:   sliceEmailService,
+		signUp:         handlers.CreateSignUpHandler(userService, sessionService),
+		login:          handlers.CreateLoginHandler(userService, sessionService),
+		passwordReset:  handlers.CreatePasswordResetRequestHandler(userService),
+		tokenReset:     handlers.CreateTokenPasswordResetHandler(userService),
 	}
 }
 
@@ -684,4 +1374,68 @@ func countAuthAttemptsByEmailAndOutcome(t *testing.T, pool *pgxpool.Pool, email 
 	}
 
 	return count
+}
+
+func countPasswordResetRequestsByUserID(t *testing.T, pool *pgxpool.Pool, userID int64) int {
+	t.Helper()
+
+	var count int
+	err := pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM password_reset_requests WHERE user_id = $1", userID).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count password reset requests for user %v: %v", userID, err)
+	}
+
+	return count
+}
+
+func countPasswordResetRequests(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+
+	var count int
+	err := pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM password_reset_requests").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count password reset requests: %v", err)
+	}
+
+	return count
+}
+
+func updateAuthAttemptsCreatedAtForEmailAndActionAndOutcome(t *testing.T, pool *pgxpool.Pool, email string, action db.AuthAction, outcome db.AuthOutcome, date time.Time) {
+	t.Helper()
+
+	tag, err := pool.Exec(context.Background(), "UPDATE auth_attempts SET created_at = $1 WHERE email = $2 AND action = $3 AND outcome = $4", date, email, action, outcome)
+	if err != nil {
+		t.Fatalf("failed to update auth_attempts created_at for email %q: %v", email, err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		t.Fatalf("expected to update auth_attempts created_at for email %q, updated 0 rows", email)
+	}
+}
+
+func updatePasswordResetReqCreatedAtForUserID(t *testing.T, pool *pgxpool.Pool, userID int64, date time.Time) {
+	t.Helper()
+
+	tag, err := pool.Exec(context.Background(), "UPDATE password_reset_requests SET created_at = $1 WHERE user_id = $2", date, userID)
+	if err != nil {
+		t.Fatalf("failed to update password_reset_requests created_at for user %v: %v", userID, err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		t.Fatalf("expected to update password_reset_requests created_at for user %v, updated 0 rows", userID)
+	}
+}
+
+func extractTokenFromResetBody(body string) string {
+	parts := strings.Split(body, "?token=")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	token := strings.TrimSpace(parts[len(parts)-1])
+	if token == "" {
+		return ""
+	}
+
+	return token
 }

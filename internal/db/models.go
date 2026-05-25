@@ -104,6 +104,12 @@ type AuthAttempt struct {
 	Outcome   AuthOutcome
 }
 
+type PasswordResetRequest struct {
+	ID        []byte
+	UserID    int64
+	CreatedAt pgtype.Timestamptz
+}
+
 type Session struct {
 	ID              []byte
 	UserID          int64

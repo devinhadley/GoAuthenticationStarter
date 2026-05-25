@@ -18,7 +18,7 @@ import (
 )
 
 // NOTE: Integration tests should cover main happy paths of session middleware and reasonable errors.
-// Middleware unit tests here are useful for difficult to produce errors and key regression risks.
+// Middleware unit tests here are useful for difficult to produce errors.
 
 func TestCreateSessionMiddlewareErrorFlows(t *testing.T) {
 	t.Run("rotate session error proceeds as best effort", testRotateSessionErrorProceedsBestEffort)
@@ -30,6 +30,14 @@ func TestCreateSessionMiddlewareFlowControl(t *testing.T) {
 	t.Run("rotation success updates last seen with rotated id", testRotationSuccessUpdatesLastSeenWithRotatedID)
 }
 
+func createTestUserService(mockedQueries *mocks.MockUserQueries, mockedEmailService mocks.MockEmailService, config user.Config) *user.Service {
+	runWithTx := func(ctx context.Context, fn func(q user.UserQueries) error) error {
+		return fn(mockedQueries)
+	}
+
+	return user.NewService(mockedQueries, runWithTx, mockedEmailService, config)
+}
+
 func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 	ctx := context.Background()
 	originalID := []byte("session-id-123456")
@@ -38,11 +46,11 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 	updateLastSeenCalled := false
 	nextCalled := false
 
-	userService := user.NewService(&mocks.MockUserQueries{
+	userService := createTestUserService(&mocks.MockUserQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{ID: id, Email: "test@example.com"}, nil
 		},
-	})
+	}, mocks.MockEmailService{}, user.Config{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
@@ -104,7 +112,7 @@ func testExpiredSessionExpireErrorClearsCookie(t *testing.T) {
 	expireErr := errors.New("expire failed")
 	nextCalled := false
 
-	userService := user.NewService(&mocks.MockUserQueries{})
+	userService := createTestUserService(&mocks.MockUserQueries{}, mocks.MockEmailService{}, user.Config{})
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
@@ -158,11 +166,11 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 	updateErr := errors.New("update last seen failed")
 	nextCalled := false
 
-	userService := user.NewService(&mocks.MockUserQueries{
+	userService := createTestUserService(&mocks.MockUserQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{ID: id, Email: "test@example.com"}, nil
 		},
-	})
+	}, mocks.MockEmailService{}, user.Config{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
@@ -209,7 +217,7 @@ func testRotationSuccessUpdatesLastSeenWithRotatedID(t *testing.T) {
 
 	updateLastSeenCalled := false
 
-	userService := user.NewService(&mocks.MockUserQueries{})
+	userService := createTestUserService(&mocks.MockUserQueries{}, mocks.MockEmailService{}, user.Config{})
 
 	sessionService := session.NewService(&mocks.MockSessionQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
@@ -262,7 +270,7 @@ func TestCreateGetUserFuncCachesUser(t *testing.T) {
 	callCount := 0
 	wantUser := db.User{ID: userID, Email: "test@example.com"}
 
-	userService := user.NewService(&mocks.MockUserQueries{
+	userService := createTestUserService(&mocks.MockUserQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			callCount++
 			if id != userID {
@@ -271,7 +279,7 @@ func TestCreateGetUserFuncCachesUser(t *testing.T) {
 
 			return wantUser, nil
 		},
-	})
+	}, mocks.MockEmailService{}, user.Config{})
 
 	getUser := createGetUserFunc(userID, userService, context.Background())
 

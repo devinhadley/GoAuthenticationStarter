@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/email"
 	"devinhadley/gobootstrapweb/internal/handlers"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
@@ -27,11 +29,24 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	userService := user.NewService(queries)
+	isProd := strings.ToLower(utils.GetEnvOrExit("IS_PROD")) != "false"
+	var mailService email.Service
+	if isProd {
+		log.Fatalf("no production email service configured.")
+	} else {
+		mailService = email.MailHogService{}
+	}
+
+	passwordResetURL := utils.GetEnvOrExit("PASSWORD_RESET_URL")
+	txnGenerator := user.CreateUserServiceTxnGenerator(dbConPool, queries)
+
+	userService := user.NewService(queries, txnGenerator, mailService, user.Config{PasswordResetURL: passwordResetURL})
 	sessionService := session.NewService(queries)
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
 	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))
+	mux.Handle("POST /password-reset", handlers.CreatePasswordResetRequestHandler(userService))
+	mux.Handle("PUT /password-reset", handlers.CreateTokenPasswordResetHandler(userService))
 
 	http.ListenAndServe(":8080", mux)
 }

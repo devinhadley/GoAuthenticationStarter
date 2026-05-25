@@ -11,13 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAuthAttemptsForPassResetReq = `-- name: CountAuthAttemptsForPassResetReq :one
+SELECT 
+  COUNT(*) AS old_count,
+  COUNT(*) FILTER (WHERE created_at >= ($1)) AS recent_count
+FROM auth_attempts
+WHERE action = 'password_reset'
+  AND email = $2
+  AND created_at >= $3
+`
+
+type CountAuthAttemptsForPassResetReqParams struct {
+	RecentDate pgtype.Timestamptz
+	Email      string
+	OldDate    pgtype.Timestamptz
+}
+
+type CountAuthAttemptsForPassResetReqRow struct {
+	OldCount    int64
+	RecentCount int64
+}
+
+func (q *Queries) CountAuthAttemptsForPassResetReq(ctx context.Context, arg CountAuthAttemptsForPassResetReqParams) (CountAuthAttemptsForPassResetReqRow, error) {
+	row := q.db.QueryRow(ctx, countAuthAttemptsForPassResetReq, arg.RecentDate, arg.Email, arg.OldDate)
+	var i CountAuthAttemptsForPassResetReqRow
+	err := row.Scan(&i.OldCount, &i.RecentCount)
+	return i, err
+}
+
 const countFailedAuthAttemptsSince = `-- name: CountFailedAuthAttemptsSince :one
 SELECT COUNT(*)
 FROM auth_attempts
 WHERE action = $1
 AND email = $2
-AND created_at >= $3
 AND outcome = 'failed'
+AND created_at >= $3
 `
 
 type CountFailedAuthAttemptsSinceParams struct {
