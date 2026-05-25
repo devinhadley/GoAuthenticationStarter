@@ -17,8 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TODO: Lets make
-
 // NOTE: Integration tests should cover main happy paths of session middleware and reasonable errors.
 // Middleware unit tests here are useful for difficult to produce errors.
 
