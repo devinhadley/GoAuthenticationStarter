@@ -10,8 +10,8 @@ CREATE TABLE auth_attempts (
   outcome auth_outcome NOT NULL
 );
 
-CREATE INDEX idx_auth_attempts_action_email_outcome_created_at
-ON auth_attempts(action, email, outcome, created_at);
+CREATE INDEX idx_auth_attempts_action_email_created_at
+ON auth_attempts(action, email, created_at);
 
 -- +goose Down
 DROP TABLE IF EXISTS auth_attempts;
