@@ -58,7 +58,7 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test user %v", err)
 	}
-	createdSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	createdSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -223,7 +223,7 @@ func testValidSessionButUserInactive(t *testing.T) {
 		t.Fatalf("failed to create test user %v", err)
 	}
 
-	createdSession, err := deps.sessionService.CreateSession(ctx, usr)
+	createdSession, err := deps.sessionService.CreateSession(ctx, usr.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -299,7 +299,7 @@ func testAbsoluteExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test user %v", err)
 	}
-	session, err := deps.sessionService.CreateSession(context.Background(), createdUser)
+	session, err := deps.sessionService.CreateSession(context.Background(), createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -367,7 +367,7 @@ func testIdleExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test user %v", err)
 	}
-	session, err := deps.sessionService.CreateSession(context.Background(), createdUser)
+	session, err := deps.sessionService.CreateSession(context.Background(), createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -430,7 +430,7 @@ func testSessionRotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test user %v", err)
 	}
-	createdSession, err := deps.sessionService.CreateSession(context.Background(), createdUser)
+	createdSession, err := deps.sessionService.CreateSession(context.Background(), createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -515,7 +515,7 @@ func testCreateSessionDeactivatesOnlyLeastRecentlyUsedSessionWhenLimitExceeded(t
 
 	sessions := make([]session.Session, 0, 10)
 	for range 10 {
-		createdSession, createErr := deps.sessionService.CreateSession(ctx, createdUser)
+		createdSession, createErr := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 		if createErr != nil {
 			t.Fatalf("failed to create test session %v", createErr)
 		}
@@ -525,7 +525,7 @@ func testCreateSessionDeactivatesOnlyLeastRecentlyUsedSessionWhenLimitExceeded(t
 
 	makeSessionLastSeenEarlier(t, deps, sessions[0].DBSession().ID)
 
-	eleventhSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	eleventhSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create eleventh session %v", err)
 	}
@@ -556,7 +556,7 @@ func testUpdateLastSeenWhenThresholdReached(t *testing.T) {
 		t.Fatalf("failed to create test user %v", err)
 	}
 
-	createdSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	createdSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create test session %v", err)
 	}
@@ -736,6 +736,7 @@ func getTestDependencies(t *testing.T) sessionIntegrationTestDependencies {
 
 	queries := db.New(pool)
 	txnGenerator := user.CreateUserServiceTxnGenerator(pool, queries)
+	sessionService := session.NewService(queries)
 
-	return sessionIntegrationTestDependencies{queries: *queries, userService: *user.NewService(queries, txnGenerator, email.MailHogService{}, user.Config{PasswordResetURL: "http://example.com/password-reset"}), sessionService: *session.NewService(queries), pool: pool}
+	return sessionIntegrationTestDependencies{queries: *queries, userService: *user.NewService(queries, txnGenerator, email.MailHogService{}, sessionService, user.Config{PasswordResetURL: "http://example.com/password-reset"}), sessionService: *sessionService, pool: pool}
 }

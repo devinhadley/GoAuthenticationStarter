@@ -18,7 +18,6 @@ type MockUserQueries struct {
 	CreatePasswordResetRequestFn       func(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
 	ConsumePasswordResetRequestFn      func(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
 	UpdatePasswordHashFn               func(ctx context.Context, arg db.UpdatePasswordHashParams) error
-	DeactivateAllSessionsForUserFn     func(ctx context.Context, userID int64) error
 }
 
 func (q *MockUserQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
@@ -102,17 +101,10 @@ func (q *MockUserQueries) UpdatePasswordHash(ctx context.Context, arg db.UpdateP
 	return nil
 }
 
-func (q *MockUserQueries) DeactivateAllSessionsForUser(ctx context.Context, userID int64) error {
-	if q.DeactivateAllSessionsForUserFn != nil {
-		return q.DeactivateAllSessionsForUserFn(ctx, userID)
-	}
-
-	return nil
-}
-
 type MockSessionQueries struct {
 	CreateSessionFn                             func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
 	DeactivateLeastRecentlyUsedSessionForUserFn func(ctx context.Context, userID int64) error
+	DeactivateAllSessionsForUserFn              func(ctx context.Context, userID int64) error
 	DeactivateSessionFn                         func(ctx context.Context, id []byte) error
 	GetActiveSessionFn                          func(ctx context.Context, id []byte) (db.Session, error)
 	GetSessionCountByUserFn                     func(ctx context.Context, userID int64) (int64, error)
@@ -139,6 +131,14 @@ func (q *MockSessionQueries) DeactivateSession(ctx context.Context, id []byte) e
 func (q *MockSessionQueries) DeactivateLeastRecentlyUsedSessionForUser(ctx context.Context, userID int64) error {
 	if q.DeactivateLeastRecentlyUsedSessionForUserFn != nil {
 		return q.DeactivateLeastRecentlyUsedSessionForUserFn(ctx, userID)
+	}
+
+	return nil
+}
+
+func (q *MockSessionQueries) DeactivateAllSessionsForUser(ctx context.Context, userID int64) error {
+	if q.DeactivateAllSessionsForUserFn != nil {
+		return q.DeactivateAllSessionsForUserFn(ctx, userID)
 	}
 
 	return nil

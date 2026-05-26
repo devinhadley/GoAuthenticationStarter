@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/service/user"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +22,7 @@ type SessionQueries interface {
 	UpdateSessionIDAndRefreshedAt(ctx context.Context, arg db.UpdateSessionIDAndRefreshedAtParams) (db.Session, error)
 	UpdateSessionLastSeenToNow(ctx context.Context, id []byte) (db.Session, error)
 	DeactivateSession(ctx context.Context, id []byte) error
+	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
 }
 
 type Service struct {
@@ -42,14 +42,14 @@ var (
 
 const MaxNumberOfActiveSessions = 10
 
-func (s *Service) CreateSession(ctx context.Context, usr user.User) (Session, error) {
-	numSessions, err := s.queries.GetSessionCountByUser(ctx, usr.DBUser().ID)
+func (s *Service) CreateSession(ctx context.Context, userID int64) (Session, error) {
+	numSessions, err := s.queries.GetSessionCountByUser(ctx, userID)
 	if err != nil {
 		return Session{}, fmt.Errorf("getting session count: %w", err)
 	}
 
 	if numSessions >= MaxNumberOfActiveSessions {
-		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, usr.DBUser().ID)
+		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, userID)
 		if err != nil {
 			return Session{}, fmt.Errorf("deactivating least recently used session: %w", err)
 		}
@@ -62,7 +62,7 @@ func (s *Service) CreateSession(ctx context.Context, usr user.User) (Session, er
 
 	session, err := s.queries.CreateSession(ctx, db.CreateSessionParams{
 		ID:     sessionID,
-		UserID: usr.DBUser().ID,
+		UserID: userID,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -127,6 +127,14 @@ func (s *Service) RotateSession(ctx context.Context, sessionID []byte) (Session,
 	}
 
 	return SessionFromDB(updatedSession), nil
+}
+
+func (s *Service) DeactivateAllSessionsForUser(ctx context.Context, userID int64) error {
+	err := s.queries.DeactivateAllSessionsForUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func generateSessionID() ([]byte, error) {
