@@ -608,7 +608,7 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 
 	var requestSession session.Session
 	for range 3 {
-		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser)
+		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 		if err != nil {
 			t.Fatalf("failed to create active session: %v", err)
 		}
@@ -690,7 +690,7 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 		t.Fatalf("failed to create test user: %v", err)
 	}
 
-	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create active session: %v", err)
 	}
@@ -759,7 +759,7 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 		t.Fatalf("failed to create test user: %v", err)
 	}
 
-	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser)
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create active session: %v", err)
 	}
@@ -1058,12 +1058,12 @@ func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testi
 		t.Fatalf("failed to create test user: %v", err)
 	}
 
-	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	_, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create first active session: %v", err)
 	}
 
-	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	_, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create second active session: %v", err)
 	}
@@ -1136,7 +1136,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		t.Fatalf("failed to create test user: %v", err)
 	}
 
-	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	_, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create first active session: %v", err)
 	}
@@ -1217,7 +1217,7 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 		t.Fatalf("ResetPasswordFromResetRequest returned error on first use: %v", err)
 	}
 
-	_, err = deps.sessionService.CreateSession(ctx, createdUser)
+	_, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 	if err != nil {
 		t.Fatalf("failed to create first active session: %v", err)
 	}
@@ -1257,8 +1257,8 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	queries := db.New(pool)
 	sliceEmailService := &email.SliceEmailService{}
 	txnGenerator := user.CreateUserServiceTxnGenerator(pool, queries)
-	userService := user.NewService(queries, txnGenerator, sliceEmailService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
 	sessionService := session.NewService(queries)
+	userService := user.NewService(queries, txnGenerator, sliceEmailService, sessionService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
 
 	return userIntegrationDeps{
 		pool:           pool,

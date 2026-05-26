@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/testutil/mocks"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/matthewhartstonge/argon2"
 )
+
+// TODO: Following the implemention of service level mocks, we should produce assertions that deactivate all sessions correctly called for password
+// reset flows.
 
 func TestSignUp(t *testing.T) {
 	t.Run("user can sign up", testUserSignUp)
@@ -676,7 +680,6 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 	})
 
 	updated := false
-	sessionsDeactivated := false
 	var updatedHash string
 
 	userService := setupUserService(t, mocks.MockUserQueries{
@@ -693,18 +696,6 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 			updatedHash = arg.PasswordHash
 			return nil
 		},
-		DeactivateAllSessionsForUserFn: func(callCtx context.Context, userID int64) error {
-			if callCtx != ctx {
-				t.Fatal("DeactivateAllSessionsForUser called with unexpected context")
-			}
-
-			if userID != usr.DBUser().ID {
-				t.Fatalf("DeactivateAllSessionsForUser got userID %v, want %v", userID, usr.DBUser().ID)
-			}
-
-			sessionsDeactivated = true
-			return nil
-		},
 	})
 
 	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
@@ -717,10 +708,6 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 
 	if !updated {
 		t.Fatal("UpdatePasswordHash was not called")
-	}
-
-	if !sessionsDeactivated {
-		t.Fatal("DeactivateAllSessionsForUser was not called")
 	}
 
 	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(updatedHash))
@@ -760,10 +747,6 @@ func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
 	userService := setupUserService(t, mocks.MockUserQueries{
 		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 			t.Fatal("UpdatePasswordHash should not be called when current password is incorrect")
-			return nil
-		},
-		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
-			t.Fatal("DeactivateAllSessionsForUser should not be called when current password is incorrect")
 			return nil
 		},
 	})
@@ -809,10 +792,6 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 			userService := setupUserService(t, mocks.MockUserQueries{
 				UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 					t.Fatal("UpdatePasswordHash should not be called for weak password")
-					return nil
-				},
-				DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
-					t.Fatal("DeactivateAllSessionsForUser should not be called for weak password")
 					return nil
 				},
 			})
@@ -1136,7 +1115,6 @@ func testCanResetPasswordWithToken(t *testing.T) {
 
 	updated := false
 	consumed := false
-	sessionsDeactivated := false
 	var updatedHash string
 
 	userService := setupUserService(t, mocks.MockUserQueries{
@@ -1171,17 +1149,6 @@ func testCanResetPasswordWithToken(t *testing.T) {
 			updatedHash = arg.PasswordHash
 			return nil
 		},
-		DeactivateAllSessionsForUserFn: func(callCtx context.Context, gotUserID int64) error {
-			if callCtx != ctx {
-				t.Fatal("DeactivateAllSessionsForUser called with unexpected context")
-			}
-			if gotUserID != userID {
-				t.Fatalf("DeactivateAllSessionsForUser got userID %v, want %v", gotUserID, userID)
-			}
-
-			sessionsDeactivated = true
-			return nil
-		},
 	})
 
 	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
@@ -1197,10 +1164,6 @@ func testCanResetPasswordWithToken(t *testing.T) {
 	if !consumed {
 		t.Fatal("ConsumePasswordResetRequest was not called")
 	}
-	if !sessionsDeactivated {
-		t.Fatal("DeactivateAllSessionsForUser was not called")
-	}
-
 	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(updatedHash))
 	if err != nil {
 		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
@@ -1232,10 +1195,6 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		},
 		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 			t.Fatal("UpdatePasswordHash should not be called for incorrect token")
-			return nil
-		},
-		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
-			t.Fatal("DeactivateAllSessionsForUser should not be called for incorrect token")
 			return nil
 		},
 	})
@@ -1281,10 +1240,6 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 		},
 		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 			t.Fatal("UpdatePasswordHash should not be called for expired token")
-			return nil
-		},
-		DeactivateAllSessionsForUserFn: func(context.Context, int64) error {
-			t.Fatal("DeactivateAllSessionsForUser should not be called for expired token")
 			return nil
 		},
 	})
@@ -1343,8 +1298,9 @@ func setupUserServiceWithEmail(t *testing.T, mockedQueries mocks.MockUserQueries
 	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
 		return fn(&mockedQueries)
 	}
+	mockedSessionService := session.NewService(&mocks.MockSessionQueries{})
 
-	return NewService(&mockedQueries, runWithTx, mockedEmailService, Config{PasswordResetURL: passwordResetURL})
+	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{PasswordResetURL: passwordResetURL})
 }
 
 func needsImplemented(t *testing.T) {

@@ -34,8 +34,9 @@ func createTestUserService(mockedQueries *mocks.MockUserQueries, mockedEmailServ
 	runWithTx := func(ctx context.Context, fn func(q user.UserQueries) error) error {
 		return fn(mockedQueries)
 	}
+	sessionService := session.NewService(&mocks.MockSessionQueries{})
 
-	return user.NewService(mockedQueries, runWithTx, mockedEmailService, config)
+	return user.NewService(mockedQueries, runWithTx, mockedEmailService, sessionService, config)
 }
 
 func testRotateSessionErrorProceedsBestEffort(t *testing.T) {

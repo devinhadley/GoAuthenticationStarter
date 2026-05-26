@@ -40,8 +40,8 @@ func main() {
 	passwordResetURL := utils.GetEnvOrExit("PASSWORD_RESET_URL")
 	txnGenerator := user.CreateUserServiceTxnGenerator(dbConPool, queries)
 
-	userService := user.NewService(queries, txnGenerator, mailService, user.Config{PasswordResetURL: passwordResetURL})
 	sessionService := session.NewService(queries)
+	userService := user.NewService(queries, txnGenerator, mailService, sessionService, user.Config{PasswordResetURL: passwordResetURL})
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
 	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))

@@ -16,6 +16,7 @@ import (
 
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/email"
+	"devinhadley/gobootstrapweb/internal/service/session"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -59,15 +60,15 @@ type UserQueries interface {
 	CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
 	ConsumePasswordResetRequest(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
 	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
-	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
 }
 
 type Service struct {
 	queries         UserQueries
 	runWithTx       RunUserQueriesInTxFn
 	commonPasswords commonPasswords
-	emailService    email.Service
 	config          Config
+	emailService    email.Service
+	sessionService  *session.Service
 }
 
 type AuthenticateBody struct {
@@ -92,12 +93,12 @@ type Config struct {
 	PasswordResetURL string
 }
 
-func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, config Config) *Service {
+func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, sessionService *session.Service, config Config) *Service {
 	if len(config.PasswordResetURL) > 0 && !strings.HasSuffix(config.PasswordResetURL, "/") {
 		config.PasswordResetURL += "/"
 	}
 
-	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, commonPasswords: getCommonPasswords(), config: config}
+	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, sessionService: sessionService, commonPasswords: getCommonPasswords(), config: config}
 }
 
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -234,7 +235,7 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 	// NOTE:
 	// If for any reason we fail to deactivate sessions, we should still let the password reset go through.
 	// This is still bad though and deactivation should be retried at some point.
-	err = s.queries.DeactivateAllSessionsForUser(ctx, usr.DBUser().ID)
+	err = s.sessionService.DeactivateAllSessionsForUser(ctx, usr.DBUser().ID)
 	if err != nil {
 		log.Printf("deactivating all sessions during authenticated password reset: %v", err)
 		return nil
@@ -346,13 +347,14 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 		}
 
 		userID = resetRequest.UserID
+
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	err = s.queries.DeactivateAllSessionsForUser(ctx, userID)
+	err = s.sessionService.DeactivateAllSessionsForUser(ctx, userID)
 	if err != nil {
 		log.Printf("deactivating all sessions during reset from token: %v", err)
 	}

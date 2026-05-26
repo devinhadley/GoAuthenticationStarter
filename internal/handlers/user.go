@@ -37,7 +37,7 @@ func CreateSignUpHandler(userService *user.Service, sessionService *session.Serv
 			return
 		}
 
-		newSession, err := sessionService.CreateSession(r.Context(), usr)
+		newSession, err := sessionService.CreateSession(r.Context(), usr.DBUser().ID)
 		if err != nil {
 			utils.WriteAndReportInternalError(w)
 			return
@@ -73,7 +73,7 @@ func CreateLoginHandler(userService *user.Service, sessionService *session.Servi
 			return
 		}
 
-		newSession, err := sessionService.CreateSession(r.Context(), usr)
+		newSession, err := sessionService.CreateSession(r.Context(), usr.DBUser().ID)
 		if err != nil {
 			utils.WriteAndReportInternalError(w)
 			return
