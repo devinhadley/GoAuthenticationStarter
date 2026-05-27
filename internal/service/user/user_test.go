@@ -69,7 +69,7 @@ func TestPasswordRest(t *testing.T) {
 }
 
 func testUserSignUp(t *testing.T) {
-	userService := setupUserService(t, MockQueries{})
+	userService := setupUserService(t, mockQueries{})
 	ctx := context.Background()
 
 	input := AuthenticateBody{
@@ -97,7 +97,7 @@ func testUserSignUp(t *testing.T) {
 
 func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for invalid sign-up input")
 			return db.User{}, nil
@@ -132,7 +132,7 @@ func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 
 func testUserSignUpRejectsShortPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for short password")
 			return db.User{}, nil
@@ -151,7 +151,7 @@ func testUserSignUpRejectsShortPassword(t *testing.T) {
 
 func testUserSignUpRejectsLongPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for long password")
 			return db.User{}, nil
@@ -171,7 +171,7 @@ func testUserSignUpRejectsLongPassword(t *testing.T) {
 func testUserSignUpRejectsCommonPassword(t *testing.T) {
 	ctx := context.Background()
 	commonPassword := "thisiscommonpassword"
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for common password")
 			return db.User{}, nil
@@ -191,7 +191,7 @@ func testUserSignUpRejectsCommonPassword(t *testing.T) {
 
 func testUserSignUpRejectsInvalidEmail(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for invalid email")
 			return db.User{}, nil
@@ -224,7 +224,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 	inputEmail := "  User@Example.COM  "
 	expectedEmail := "User@example.com"
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			if arg.Email != expectedEmail {
 				t.Fatalf("CreateUser got email %q, want %q", arg.Email, expectedEmail)
@@ -254,7 +254,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 
 func testUserSignUpEmailTaken(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, &pgconn.PgError{
 				Code:           "23505",
@@ -277,7 +277,7 @@ func testUserSignUpPropagatesUnexpectedError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, expectedErr
 		},
@@ -307,7 +307,7 @@ func testUserLogIn(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
@@ -353,7 +353,7 @@ func testUserLogIn(t *testing.T) {
 
 func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid log-in input")
 			return db.User{}, nil
@@ -398,7 +398,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
@@ -427,7 +427,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 
 func testUserLogInRejectsInvalidEmail(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid email")
 			return db.User{}, nil
@@ -451,7 +451,7 @@ func testUserLogInRejectsInvalidEmail(t *testing.T) {
 func testUserLogInUserNotFound(t *testing.T) {
 	ctx := context.Background()
 	authAttemptCreated := false
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, pgx.ErrNoRows
 		},
@@ -482,7 +482,7 @@ func testUserLogInPropagatesUnexpectedError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, expectedErr
 		},
@@ -513,7 +513,7 @@ func testLogInWhenUserInactive(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: false}, nil
 		},
@@ -546,7 +546,7 @@ func testLogInWhenUserInactive(t *testing.T) {
 
 func testUserLogInRateLimited(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		CountFailedAuthAttemptsSinceFn: func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error) {
 			return rateLimitLoginAttemptsAllowed, nil
 		},
@@ -575,7 +575,7 @@ func testGetUserByID(t *testing.T) {
 	wantID := int64(42)
 	wantEmail := "test@example.com"
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			if id != wantID {
 				t.Fatalf("GetUserByID got id %v, want %v", id, wantID)
@@ -603,7 +603,7 @@ func testGetUserByIDPropagatesError(t *testing.T) {
 	ctx := context.Background()
 	wantErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{}, wantErr
 		},
@@ -681,7 +681,7 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 	updated := false
 	var updatedHash string
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		UpdatePasswordHashFn: func(callCtx context.Context, arg db.UpdatePasswordHashParams) error {
 			if callCtx != ctx {
 				t.Fatal("UpdatePasswordHash called with unexpected context")
@@ -743,7 +743,7 @@ func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
 		PasswordHash: string(currentPasswordHash),
 	})
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 			t.Fatal("UpdatePasswordHash should not be called when current password is incorrect")
 			return nil
@@ -788,7 +788,7 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			userService := setupUserService(t, MockQueries{
+			userService := setupUserService(t, mockQueries{
 				UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 					t.Fatal("UpdatePasswordHash should not be called for weak password")
 					return nil
@@ -823,7 +823,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 	authAttemptCreated := false
 
 	passwordResetURL := "http://example.com/password-reset"
-	userService := setupUserServiceWithEmail(t, MockQueries{
+	userService := setupUserServiceWithEmail(t, mockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -919,7 +919,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 func testCantCreatePasswordResetWithMalformedEmail(t *testing.T) {
 	ctx := context.Background()
 
-	userService := setupUserServiceWithEmail(t, MockQueries{
+	userService := setupUserServiceWithEmail(t, mockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(context.Context, db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			t.Fatal("CountAuthAttemptsForPassResetReq should not be called for malformed email")
 			return db.CountAuthAttemptsForPassResetReqRow{}, nil
@@ -954,7 +954,7 @@ func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
 	inputEmail := "user@example.com"
 	rateLimitChecked := false
 
-	userService := setupUserServiceWithEmail(t, MockQueries{
+	userService := setupUserServiceWithEmail(t, mockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -999,7 +999,7 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 	inputEmail := "unknown@example.com"
 	rateLimitChecked := false
 
-	userService := setupUserServiceWithEmail(t, MockQueries{
+	userService := setupUserServiceWithEmail(t, mockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -1064,7 +1064,7 @@ func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
 	inputEmail := "user@example.com"
 	rateLimitChecked := false
 
-	userService := setupUserServiceWithEmail(t, MockQueries{
+	userService := setupUserServiceWithEmail(t, mockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -1116,7 +1116,7 @@ func testCanResetPasswordWithToken(t *testing.T) {
 	consumed := false
 	var updatedHash string
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
 				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
@@ -1180,7 +1180,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 
 	queried := false
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
 				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
@@ -1218,7 +1218,7 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 
 	queried := false
 
-	userService := setupUserService(t, MockQueries{
+	userService := setupUserService(t, mockQueries{
 		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
 				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
@@ -1287,21 +1287,114 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 	}
 }
 
-func setupUserService(t *testing.T, mockedQueries MockQueries) *Service {
+func setupUserService(t *testing.T, mockedQueries mockQueries) *Service {
 	t.Helper()
 	return setupUserServiceWithEmail(t, mockedQueries, MockEmailService{}, "")
 }
 
-func setupUserServiceWithEmail(t *testing.T, mockedQueries MockQueries, mockedEmailService MockEmailService, passwordResetURL string) *Service {
+func setupUserServiceWithEmail(t *testing.T, mockedQueries mockQueries, mockedEmailService MockEmailService, passwordResetURL string) *Service {
 	t.Helper()
 	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
 		return fn(&mockedQueries)
 	}
-	mockedSessionService := session.NewService(&session.MockQueries{})
+	mockedSessionService := session.MockService{}
 
 	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{PasswordResetURL: passwordResetURL})
 }
 
 func needsImplemented(t *testing.T) {
 	t.Skip()
+}
+
+type mockQueries struct {
+	CreateUserFn                       func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
+	GetUserByEmailFn                   func(ctx context.Context, email string) (db.User, error)
+	GetUserByIDFn                      func(ctx context.Context, id int64) (db.User, error)
+	CountFailedAuthAttemptsSinceFn     func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
+	CountAuthAttemptsForPassResetReqFn func(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
+	CreateLoginAuthAttemptFn           func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
+	CreatePasswordResetRequestFn       func(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
+	ConsumePasswordResetRequestFn      func(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
+	UpdatePasswordHashFn               func(ctx context.Context, arg db.UpdatePasswordHashParams) error
+}
+
+func (q *mockQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
+	if q.CreateUserFn != nil {
+		return q.CreateUserFn(ctx, arg)
+	}
+
+	return db.User{
+		ID:           1,
+		Email:        arg.Email,
+		PasswordHash: arg.PasswordHash,
+	}, nil
+}
+
+func (q *mockQueries) GetUserByEmail(ctx context.Context, email string) (db.User, error) {
+	if q.GetUserByEmailFn != nil {
+		return q.GetUserByEmailFn(ctx, email)
+	}
+
+	return db.User{
+		ID:    1,
+		Email: email,
+	}, nil
+}
+
+func (q *mockQueries) GetUserByID(ctx context.Context, id int64) (db.User, error) {
+	if q.GetUserByIDFn != nil {
+		return q.GetUserByIDFn(ctx, id)
+	}
+
+	return db.User{
+		ID:    id,
+		Email: "test@example.com",
+	}, nil
+}
+
+func (q *mockQueries) CountFailedAuthAttemptsSince(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error) {
+	if q.CountFailedAuthAttemptsSinceFn != nil {
+		return q.CountFailedAuthAttemptsSinceFn(ctx, arg)
+	}
+	return 0, nil
+}
+
+func (q *mockQueries) CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+	if q.CountAuthAttemptsForPassResetReqFn != nil {
+		return q.CountAuthAttemptsForPassResetReqFn(ctx, arg)
+	}
+
+	return db.CountAuthAttemptsForPassResetReqRow{}, nil
+}
+
+func (q *mockQueries) CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+	if q.CreateLoginAuthAttemptFn != nil {
+		return q.CreateLoginAuthAttemptFn(ctx, arg)
+	}
+
+	return nil
+}
+
+func (q *mockQueries) CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error) {
+	if q.CreatePasswordResetRequestFn != nil {
+		return q.CreatePasswordResetRequestFn(ctx, arg)
+	}
+
+	return db.PasswordResetRequest{ID: arg.ID, UserID: arg.UserID}, nil
+}
+
+func (q *mockQueries) ConsumePasswordResetRequest(ctx context.Context, id []byte) (db.PasswordResetRequest, error) {
+	if q.ConsumePasswordResetRequestFn != nil {
+		return q.ConsumePasswordResetRequestFn(ctx, id)
+	}
+
+	return db.PasswordResetRequest{}, pgx.ErrNoRows
+}
+
+func (q *mockQueries) UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error {
+	if q.UpdatePasswordHashFn != nil {
+		return q.UpdatePasswordHashFn(ctx, arg)
+	}
+
+	return nil
 }

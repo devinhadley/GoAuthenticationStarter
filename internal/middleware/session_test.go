@@ -12,11 +12,11 @@ import (
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
-	
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// NOTE: Integration tests should cover main happy paths of session middleware and reasonable errors.
+// TODO: Integration tests should cover main happy paths of session middleware and reasonable errors.
 // Middleware unit tests here are useful for difficult to produce errors.
 
 func TestCreateSessionMiddlewareErrorFlows(t *testing.T) {
@@ -33,7 +33,7 @@ func createTestUserService(mockedQueries *user.MockQueries, mockedEmailService u
 	runWithTx := func(ctx context.Context, fn func(q user.UserQueries) error) error {
 		return fn(mockedQueries)
 	}
-	sessionService := session.NewService(&session.MockQueries{})
+	sessionService := session.MockService{}
 
 	return user.NewService(mockedQueries, runWithTx, mockedEmailService, sessionService, config)
 }
