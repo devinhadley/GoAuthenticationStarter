@@ -23,6 +23,17 @@ var (
 
 type GetUserFunc func() (user.User, error)
 
+type sessionMiddlewareService interface {
+	GetSession(ctx context.Context, sessionID []byte) (session.Session, error)
+	ExpireSession(ctx context.Context, sessionID []byte) error
+	RotateSession(ctx context.Context, sessionID []byte) (session.Session, error)
+	UpdateLastSeen(ctx context.Context, session session.Session) error
+}
+
+type userGetter interface {
+	GetUserByID(ctx context.Context, id int64) (user.User, error)
+}
+
 func withGetUser(ctx context.Context, getUser GetUserFunc) context.Context {
 	return context.WithValue(ctx, getUserContextKey, getUser)
 }
@@ -37,7 +48,7 @@ func UserFromContext(ctx context.Context) (user.User, error) {
 }
 
 // CreateSessionMiddleware creates an http handler which uses the id (session id) cookie to expire sessions, rotate sessions, and authenticate the user.
-func CreateSessionMiddleware(userService *user.Service, sessionService *session.Service, next http.HandlerFunc) http.HandlerFunc {
+func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddlewareService, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionCookie, err := r.Cookie("id")
 		if err != nil {
@@ -105,7 +116,7 @@ func CreateSessionMiddleware(userService *user.Service, sessionService *session.
 	}
 }
 
-func createGetUserFunc(userID int64, userService *user.Service, ctx context.Context) func() (user.User, error) {
+func createGetUserFunc(userID int64, userService userGetter, ctx context.Context) func() (user.User, error) {
 	var currentUser *user.User
 	var fetchCurrentUserError error
 
