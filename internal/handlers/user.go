@@ -1,6 +1,7 @@
 package handlers // handlers are responsible for http endpoints and http related actions.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -12,7 +13,11 @@ import (
 	"devinhadley/gobootstrapweb/internal/utils"
 )
 
-func CreateSignUpHandler(userService *user.Service, sessionService *session.Service) http.HandlerFunc {
+type sessionCreator interface {
+	CreateSession(ctx context.Context, userID int64) (session.Session, error)
+}
+
+func CreateSignUpHandler(userService *user.Service, sessionService sessionCreator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticateBody
 		decoder := json.NewDecoder(r.Body)
@@ -48,7 +53,7 @@ func CreateSignUpHandler(userService *user.Service, sessionService *session.Serv
 	}
 }
 
-func CreateLoginHandler(userService *user.Service, sessionService *session.Service) http.HandlerFunc {
+func CreateLoginHandler(userService *user.Service, sessionService sessionCreator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticateBody
 		decoder := json.NewDecoder(r.Body)

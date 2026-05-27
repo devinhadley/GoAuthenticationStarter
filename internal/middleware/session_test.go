@@ -12,8 +12,7 @@ import (
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
-	"devinhadley/gobootstrapweb/internal/testutil/mocks"
-
+	
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -30,11 +29,11 @@ func TestCreateSessionMiddlewareFlowControl(t *testing.T) {
 	t.Run("rotation success updates last seen with rotated id", testRotationSuccessUpdatesLastSeenWithRotatedID)
 }
 
-func createTestUserService(mockedQueries *mocks.MockUserQueries, mockedEmailService mocks.MockEmailService, config user.Config) *user.Service {
+func createTestUserService(mockedQueries *user.MockQueries, mockedEmailService user.MockEmailService, config user.Config) *user.Service {
 	runWithTx := func(ctx context.Context, fn func(q user.UserQueries) error) error {
 		return fn(mockedQueries)
 	}
-	sessionService := session.NewService(&mocks.MockSessionQueries{})
+	sessionService := session.NewService(&session.MockQueries{})
 
 	return user.NewService(mockedQueries, runWithTx, mockedEmailService, sessionService, config)
 }
@@ -47,13 +46,13 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 	updateLastSeenCalled := false
 	nextCalled := false
 
-	userService := createTestUserService(&mocks.MockUserQueries{
+	userService := createTestUserService(&user.MockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{ID: id, Email: "test@example.com"}, nil
 		},
-	}, mocks.MockEmailService{}, user.Config{})
+	}, user.MockEmailService{}, user.Config{})
 
-	sessionService := session.NewService(&mocks.MockSessionQueries{
+	sessionService := session.NewService(&session.MockQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
@@ -113,8 +112,8 @@ func testExpiredSessionExpireErrorClearsCookie(t *testing.T) {
 	expireErr := errors.New("expire failed")
 	nextCalled := false
 
-	userService := createTestUserService(&mocks.MockUserQueries{}, mocks.MockEmailService{}, user.Config{})
-	sessionService := session.NewService(&mocks.MockSessionQueries{
+	userService := createTestUserService(&user.MockQueries{}, user.MockEmailService{}, user.Config{})
+	sessionService := session.NewService(&session.MockQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
@@ -167,13 +166,13 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 	updateErr := errors.New("update last seen failed")
 	nextCalled := false
 
-	userService := createTestUserService(&mocks.MockUserQueries{
+	userService := createTestUserService(&user.MockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{ID: id, Email: "test@example.com"}, nil
 		},
-	}, mocks.MockEmailService{}, user.Config{})
+	}, user.MockEmailService{}, user.Config{})
 
-	sessionService := session.NewService(&mocks.MockSessionQueries{
+	sessionService := session.NewService(&session.MockQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
@@ -218,9 +217,9 @@ func testRotationSuccessUpdatesLastSeenWithRotatedID(t *testing.T) {
 
 	updateLastSeenCalled := false
 
-	userService := createTestUserService(&mocks.MockUserQueries{}, mocks.MockEmailService{}, user.Config{})
+	userService := createTestUserService(&user.MockQueries{}, user.MockEmailService{}, user.Config{})
 
-	sessionService := session.NewService(&mocks.MockSessionQueries{
+	sessionService := session.NewService(&session.MockQueries{
 		GetActiveSessionFn: func(ctx context.Context, id []byte) (db.Session, error) {
 			return db.Session{
 				ID:              originalID,
@@ -271,7 +270,7 @@ func TestCreateGetUserFuncCachesUser(t *testing.T) {
 	callCount := 0
 	wantUser := db.User{ID: userID, Email: "test@example.com"}
 
-	userService := createTestUserService(&mocks.MockUserQueries{
+	userService := createTestUserService(&user.MockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			callCount++
 			if id != userID {
@@ -280,7 +279,7 @@ func TestCreateGetUserFuncCachesUser(t *testing.T) {
 
 			return wantUser, nil
 		},
-	}, mocks.MockEmailService{}, user.Config{})
+	}, user.MockEmailService{}, user.Config{})
 
 	getUser := createGetUserFunc(userID, userService, context.Background())
 

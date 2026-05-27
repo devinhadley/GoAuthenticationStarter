@@ -11,7 +11,6 @@ import (
 
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/service/session"
-	"devinhadley/gobootstrapweb/internal/testutil/mocks"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -70,7 +69,7 @@ func TestPasswordRest(t *testing.T) {
 }
 
 func testUserSignUp(t *testing.T) {
-	userService := setupUserService(t, mocks.MockUserQueries{})
+	userService := setupUserService(t, MockQueries{})
 	ctx := context.Background()
 
 	input := AuthenticateBody{
@@ -98,7 +97,7 @@ func testUserSignUp(t *testing.T) {
 
 func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for invalid sign-up input")
 			return db.User{}, nil
@@ -133,7 +132,7 @@ func testUserSignUpRejectsBlankEmailOrPassword(t *testing.T) {
 
 func testUserSignUpRejectsShortPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for short password")
 			return db.User{}, nil
@@ -152,7 +151,7 @@ func testUserSignUpRejectsShortPassword(t *testing.T) {
 
 func testUserSignUpRejectsLongPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for long password")
 			return db.User{}, nil
@@ -172,7 +171,7 @@ func testUserSignUpRejectsLongPassword(t *testing.T) {
 func testUserSignUpRejectsCommonPassword(t *testing.T) {
 	ctx := context.Background()
 	commonPassword := "thisiscommonpassword"
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for common password")
 			return db.User{}, nil
@@ -192,7 +191,7 @@ func testUserSignUpRejectsCommonPassword(t *testing.T) {
 
 func testUserSignUpRejectsInvalidEmail(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			t.Fatal("CreateUser should not be called for invalid email")
 			return db.User{}, nil
@@ -225,7 +224,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 	inputEmail := "  User@Example.COM  "
 	expectedEmail := "User@example.com"
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			if arg.Email != expectedEmail {
 				t.Fatalf("CreateUser got email %q, want %q", arg.Email, expectedEmail)
@@ -255,7 +254,7 @@ func testUserSignUpNormalizesAndTrimsEmail(t *testing.T) {
 
 func testUserSignUpEmailTaken(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, &pgconn.PgError{
 				Code:           "23505",
@@ -278,7 +277,7 @@ func testUserSignUpPropagatesUnexpectedError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, expectedErr
 		},
@@ -308,7 +307,7 @@ func testUserLogIn(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
@@ -354,7 +353,7 @@ func testUserLogIn(t *testing.T) {
 
 func testUserLogInRejectsBlankEmailOrPassword(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid log-in input")
 			return db.User{}, nil
@@ -399,7 +398,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
 		},
@@ -428,7 +427,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 
 func testUserLogInRejectsInvalidEmail(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for invalid email")
 			return db.User{}, nil
@@ -452,7 +451,7 @@ func testUserLogInRejectsInvalidEmail(t *testing.T) {
 func testUserLogInUserNotFound(t *testing.T) {
 	ctx := context.Background()
 	authAttemptCreated := false
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, pgx.ErrNoRows
 		},
@@ -483,7 +482,7 @@ func testUserLogInPropagatesUnexpectedError(t *testing.T) {
 	ctx := context.Background()
 	expectedErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{}, expectedErr
 		},
@@ -514,7 +513,7 @@ func testLogInWhenUserInactive(t *testing.T) {
 		t.Fatalf("failed to hash initial password: %v", err)
 	}
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
 			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: false}, nil
 		},
@@ -547,7 +546,7 @@ func testLogInWhenUserInactive(t *testing.T) {
 
 func testUserLogInRateLimited(t *testing.T) {
 	ctx := context.Background()
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		CountFailedAuthAttemptsSinceFn: func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error) {
 			return rateLimitLoginAttemptsAllowed, nil
 		},
@@ -576,7 +575,7 @@ func testGetUserByID(t *testing.T) {
 	wantID := int64(42)
 	wantEmail := "test@example.com"
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			if id != wantID {
 				t.Fatalf("GetUserByID got id %v, want %v", id, wantID)
@@ -604,7 +603,7 @@ func testGetUserByIDPropagatesError(t *testing.T) {
 	ctx := context.Background()
 	wantErr := errors.New("database unavailable")
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		GetUserByIDFn: func(ctx context.Context, id int64) (db.User, error) {
 			return db.User{}, wantErr
 		},
@@ -682,7 +681,7 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 	updated := false
 	var updatedHash string
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		UpdatePasswordHashFn: func(callCtx context.Context, arg db.UpdatePasswordHashParams) error {
 			if callCtx != ctx {
 				t.Fatal("UpdatePasswordHash called with unexpected context")
@@ -744,7 +743,7 @@ func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
 		PasswordHash: string(currentPasswordHash),
 	})
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 			t.Fatal("UpdatePasswordHash should not be called when current password is incorrect")
 			return nil
@@ -789,7 +788,7 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			userService := setupUserService(t, mocks.MockUserQueries{
+			userService := setupUserService(t, MockQueries{
 				UpdatePasswordHashFn: func(context.Context, db.UpdatePasswordHashParams) error {
 					t.Fatal("UpdatePasswordHash should not be called for weak password")
 					return nil
@@ -824,7 +823,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 	authAttemptCreated := false
 
 	passwordResetURL := "http://example.com/password-reset"
-	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+	userService := setupUserServiceWithEmail(t, MockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -874,7 +873,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 			authAttemptCreated = true
 			return nil
 		},
-	}, mocks.MockEmailService{
+	}, MockEmailService{
 		SendMailFn: func(toEmail string, subject string, body string) error {
 			prefix := "http://example.com/password-reset/?token="
 
@@ -920,7 +919,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 func testCantCreatePasswordResetWithMalformedEmail(t *testing.T) {
 	ctx := context.Background()
 
-	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+	userService := setupUserServiceWithEmail(t, MockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(context.Context, db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			t.Fatal("CountAuthAttemptsForPassResetReq should not be called for malformed email")
 			return db.CountAuthAttemptsForPassResetReqRow{}, nil
@@ -937,7 +936,7 @@ func testCantCreatePasswordResetWithMalformedEmail(t *testing.T) {
 			t.Fatal("CreateLoginAuthAttempt should not be called for malformed email")
 			return nil
 		},
-	}, mocks.MockEmailService{
+	}, MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for malformed email")
 			return nil
@@ -955,7 +954,7 @@ func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
 	inputEmail := "user@example.com"
 	rateLimitChecked := false
 
-	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+	userService := setupUserServiceWithEmail(t, MockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -978,7 +977,7 @@ func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
 			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited password reset request")
 			return nil
 		},
-	}, mocks.MockEmailService{
+	}, MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for rate limited password reset request")
 			return nil
@@ -1000,7 +999,7 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 	inputEmail := "unknown@example.com"
 	rateLimitChecked := false
 
-	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+	userService := setupUserServiceWithEmail(t, MockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -1043,7 +1042,7 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 
 			return nil
 		},
-	}, mocks.MockEmailService{
+	}, MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for unknown email")
 			return nil
@@ -1065,7 +1064,7 @@ func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
 	inputEmail := "user@example.com"
 	rateLimitChecked := false
 
-	userService := setupUserServiceWithEmail(t, mocks.MockUserQueries{
+	userService := setupUserServiceWithEmail(t, MockQueries{
 		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
 			if callCtx != ctx {
 				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
@@ -1088,7 +1087,7 @@ func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
 			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited password reset request")
 			return nil
 		},
-	}, mocks.MockEmailService{
+	}, MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for rate limited password reset request")
 			return nil
@@ -1117,7 +1116,7 @@ func testCanResetPasswordWithToken(t *testing.T) {
 	consumed := false
 	var updatedHash string
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
 				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
@@ -1181,7 +1180,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 
 	queried := false
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
 				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
@@ -1219,7 +1218,7 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 
 	queried := false
 
-	userService := setupUserService(t, mocks.MockUserQueries{
+	userService := setupUserService(t, MockQueries{
 		ConsumePasswordResetRequestFn: func(callCtx context.Context, id []byte) (db.PasswordResetRequest, error) {
 			if callCtx != ctx {
 				t.Fatal("ConsumePasswordResetRequest called with unexpected context")
@@ -1288,17 +1287,17 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 	}
 }
 
-func setupUserService(t *testing.T, mockedQueries mocks.MockUserQueries) *Service {
+func setupUserService(t *testing.T, mockedQueries MockQueries) *Service {
 	t.Helper()
-	return setupUserServiceWithEmail(t, mockedQueries, mocks.MockEmailService{}, "")
+	return setupUserServiceWithEmail(t, mockedQueries, MockEmailService{}, "")
 }
 
-func setupUserServiceWithEmail(t *testing.T, mockedQueries mocks.MockUserQueries, mockedEmailService mocks.MockEmailService, passwordResetURL string) *Service {
+func setupUserServiceWithEmail(t *testing.T, mockedQueries MockQueries, mockedEmailService MockEmailService, passwordResetURL string) *Service {
 	t.Helper()
 	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
 		return fn(&mockedQueries)
 	}
-	mockedSessionService := session.NewService(&mocks.MockSessionQueries{})
+	mockedSessionService := session.NewService(&session.MockQueries{})
 
 	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{PasswordResetURL: passwordResetURL})
 }
