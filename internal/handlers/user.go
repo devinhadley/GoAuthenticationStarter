@@ -45,7 +45,7 @@ func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) h
 
 		err := decoder.Decode(&reqBody)
 		if err != nil {
-			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 			return
 		}
 
@@ -58,13 +58,13 @@ func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) h
 				return
 			}
 
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 
 		newSession, err := sessionService.CreateSession(r.Context(), usr.DBUser().ID)
 		if err != nil {
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 		utils.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
@@ -81,7 +81,7 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 
 		err := decoder.Decode(&reqBody)
 		if err != nil {
-			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 			return
 		}
 
@@ -94,13 +94,13 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 				return
 			}
 
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 
 		newSession, err := sessionService.CreateSession(r.Context(), usr.DBUser().ID)
 		if err != nil {
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 		utils.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
@@ -117,7 +117,7 @@ func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordRe
 		decoder.DisallowUnknownFields()
 		err := decoder.Decode(&reqBody)
 		if err != nil {
-			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 			return
 		}
 
@@ -127,11 +127,11 @@ func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordRe
 		usr, err := middleware.UserFromContext(r.Context())
 		if err != nil {
 			if errors.Is(err, middleware.ErrUserNotInContext) {
-				utils.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+				WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 				return
 			}
 			log.Printf("when getting user for authenticated password reset: %v", err)
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 
@@ -140,7 +140,7 @@ func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordRe
 			if writeAuthenticatedPasswordResetError(w, err) {
 				return
 			}
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 
@@ -157,7 +157,7 @@ func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.
 		decoder.DisallowUnknownFields()
 		err := decoder.Decode(&reqBody)
 		if err != nil {
-			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 			return
 		}
 
@@ -167,7 +167,7 @@ func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.
 				return
 			}
 
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 
@@ -185,7 +185,7 @@ func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Han
 
 		err := decoder.Decode(&reqBody)
 		if err != nil {
-			utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 			return
 		}
 
@@ -195,7 +195,7 @@ func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Han
 				return
 			}
 
-			utils.WriteAndReportInternalError(w)
+			WriteAndReportInternalError(w)
 			return
 		}
 
@@ -205,17 +205,17 @@ func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Han
 
 func writeSignUpError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrEmailBlank) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email may not be blank"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email may not be blank"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrEmailTaken) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email already in use"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email already in use"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrInvalidEmail) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
 		return true
 	}
 
@@ -228,22 +228,22 @@ func writeSignUpError(w http.ResponseWriter, err error) bool {
 
 func writeLogInError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrInvalidCredentials) {
-		utils.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
+		WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrInvalidLogInInput) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "email and password may not be blank"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "email and password may not be blank"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrInvalidEmail) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrRateLimit) {
-		utils.WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
+		WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
 		return true
 	}
 
@@ -252,7 +252,7 @@ func writeLogInError(w http.ResponseWriter, err error) bool {
 
 func writeAuthenticatedPasswordResetError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrInvalidCredentials) {
-		utils.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
+		WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
 		return true
 	}
 
@@ -265,12 +265,12 @@ func writeAuthenticatedPasswordResetError(w http.ResponseWriter, err error) bool
 
 func writeCreatePasswordResetRequestError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrInvalidEmail) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"email": "email is not valid"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrRateLimit) {
-		utils.WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
+		WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
 		return true
 	}
 
@@ -284,7 +284,7 @@ func writeCreatePasswordResetRequestError(w http.ResponseWriter, err error) bool
 
 func writeTokenPasswordResetError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrInvalidResetToken) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid or expired reset token"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid or expired reset token"})
 		return true
 	}
 
@@ -297,22 +297,22 @@ func writeTokenPasswordResetError(w http.ResponseWriter, err error) bool {
 
 func writeWeakPasswordError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, user.ErrPasswordEmpty) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password can't be empty"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password can't be empty"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrPasswordShort) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password must be 13 or more characters"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password must be 13 or more characters"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrPasswordLong) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password must be 256 charactrs or less"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password must be 256 charactrs or less"})
 		return true
 	}
 
 	if errors.Is(err, user.ErrPasswordCommon) {
-		utils.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password too common"})
+		WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"password": "password too common"})
 		return true
 	}
 

@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/handlers"
 	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/email"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
-	"devinhadley/gobootstrapweb/internal/utils"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -73,7 +73,7 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 			t.Fatalf("expected user from context to have id %v, got %v", createdUser.DBUser().ID, user.DBUser().ID)
 		}
 
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -122,7 +122,7 @@ func testNoSessionCookieContinuesUnauthenticated(t *testing.T) {
 			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -150,7 +150,7 @@ func testMalformedSessionCookieContinuesUnauthenticated(t *testing.T) {
 			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -186,7 +186,7 @@ func testSessionIDNotFoundContinuesUnauthenticated(t *testing.T) {
 			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -249,7 +249,7 @@ func testValidSessionButUserInactive(t *testing.T) {
 			t.Fatalf("expected error %v, got %v", middleware.ErrUserNotInContext, err)
 		}
 
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -314,7 +314,7 @@ func testAbsoluteExpiration(t *testing.T) {
 		if !errors.Is(err, middleware.ErrUserNotInContext) {
 			t.Fatalf("wanted error %v but got %v", middleware.ErrUserNotInContext, err)
 		}
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -382,7 +382,7 @@ func testIdleExpiration(t *testing.T) {
 		if !errors.Is(err, middleware.ErrUserNotInContext) {
 			t.Fatalf("wanted error %v but got %v", middleware.ErrUserNotInContext, err)
 		}
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
@@ -578,7 +578,7 @@ func testUpdateLastSeenWhenThresholdReached(t *testing.T) {
 			t.Fatalf("expected user from context to have id %v, got %v", createdUser.DBUser().ID, currentUser.DBUser().ID)
 		}
 
-		utils.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
+		handlers.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
 	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
