@@ -1,8 +1,9 @@
-package utils
+package web
 
 import (
 	"encoding/base64"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -42,8 +43,8 @@ func ClearSessionCookie(w http.ResponseWriter) {
 }
 
 func isSessionCookieSecure() bool {
-	ok, isSecure := GetEnv("USE_HTTPS")
-	if !ok {
+	isSecure := os.Getenv("USE_HTTPS")
+	if isSecure == "" {
 		return true
 	}
 

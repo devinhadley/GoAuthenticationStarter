@@ -9,7 +9,7 @@ import (
 
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
-	"devinhadley/gobootstrapweb/internal/utils"
+	"devinhadley/gobootstrapweb/internal/web"
 )
 
 type contextKey struct {
@@ -64,7 +64,7 @@ func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddl
 		sessionID, err := base64.StdEncoding.DecodeString(sessionCookie.Value)
 		if err != nil {
 			log.Print("Failed to base64 decode a session id.")
-			utils.ClearSessionCookie(w)
+			web.ClearSessionCookie(w)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -72,7 +72,7 @@ func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddl
 		curSession, err := sessionService.GetSession(r.Context(), sessionID)
 		if err != nil {
 			if err == session.ErrSessionNotFound {
-				utils.ClearSessionCookie(w)
+				web.ClearSessionCookie(w)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -87,7 +87,7 @@ func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddl
 			if err != nil {
 				log.Printf("Error when expiring session: %v", err)
 			}
-			utils.ClearSessionCookie(w)
+			web.ClearSessionCookie(w)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -98,7 +98,7 @@ func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddl
 				log.Printf("Error when rotating session: %v", err)
 			} else {
 				curSession = rotatedSession
-				utils.AddSessionToCookie(w, curSession.DBSession().ID, curSession.GetAbsoluteExpiration())
+				web.AddSessionToCookie(w, curSession.DBSession().ID, curSession.GetAbsoluteExpiration())
 			}
 		}
 

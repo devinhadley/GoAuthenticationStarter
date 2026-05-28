@@ -10,7 +10,7 @@ import (
 	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
-	"devinhadley/gobootstrapweb/internal/utils"
+	"devinhadley/gobootstrapweb/internal/web"
 )
 
 type sessionCreator interface {
@@ -67,7 +67,7 @@ func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) h
 			WriteAndReportInternalError(w)
 			return
 		}
-		utils.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
+		web.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -103,7 +103,7 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 			WriteAndReportInternalError(w)
 			return
 		}
-		utils.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
+		web.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -144,7 +144,7 @@ func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordRe
 			return
 		}
 
-		utils.ClearSessionCookie(w)
+		web.ClearSessionCookie(w)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
