@@ -16,9 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TODO: Integration tests should cover main happy paths of session middleware and reasonable errors.
-// Middleware unit tests here are useful for difficult to produce errors.
-
 func TestCreateSessionMiddlewareErrorFlows(t *testing.T) {
 	t.Run("rotate session error proceeds as best effort", testRotateSessionErrorProceedsBestEffort)
 	t.Run("expired session error still clears cookie and continues", testExpiredSessionExpireErrorClearsCookie)
