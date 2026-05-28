@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/email"
 	"devinhadley/gobootstrapweb/internal/middleware"
+	"devinhadley/gobootstrapweb/internal/service/email"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 	"devinhadley/gobootstrapweb/internal/utils"

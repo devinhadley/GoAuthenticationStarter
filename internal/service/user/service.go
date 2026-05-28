@@ -15,8 +15,7 @@ import (
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/email"
-	"devinhadley/gobootstrapweb/internal/service/session"
+	"devinhadley/gobootstrapweb/internal/service/email"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -62,13 +61,17 @@ type UserQueries interface {
 	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
 }
 
+type sessionDeactivator interface {
+	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
+}
+
 type Service struct {
 	queries         UserQueries
 	runWithTx       RunUserQueriesInTxFn
 	commonPasswords commonPasswords
 	config          Config
 	emailService    email.Service
-	sessionService  *session.Service
+	sessionService  sessionDeactivator
 }
 
 type AuthenticateBody struct {
@@ -93,7 +96,7 @@ type Config struct {
 	PasswordResetURL string
 }
 
-func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, sessionService *session.Service, config Config) *Service {
+func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, sessionService sessionDeactivator, config Config) *Service {
 	if len(config.PasswordResetURL) > 0 && !strings.HasSuffix(config.PasswordResetURL, "/") {
 		config.PasswordResetURL += "/"
 	}
