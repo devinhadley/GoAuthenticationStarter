@@ -4,12 +4,15 @@ import (
 	"encoding/base64"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 const (
 	sessionIDCookieName = "id"
 )
+
+var isSessionCookieSecure = strings.ToLower(os.Getenv("USE_HTTPS")) != "false"
 
 func AddSessionToCookie(w http.ResponseWriter, sessionID []byte, absoluteExpiration time.Time) {
 	base64SessionID := base64.StdEncoding.EncodeToString(sessionID)
@@ -20,7 +23,7 @@ func AddSessionToCookie(w http.ResponseWriter, sessionID []byte, absoluteExpirat
 		Expires:  absoluteExpiration,
 		HttpOnly: true,
 		Path:     "/",
-		Secure:   isSessionCookieSecure(),
+		Secure:   isSessionCookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	}
 
@@ -35,18 +38,9 @@ func ClearSessionCookie(w http.ResponseWriter) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Path:     "/",
-		Secure:   isSessionCookieSecure(),
+		Secure:   isSessionCookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	}
 
 	http.SetCookie(w, &cookie)
-}
-
-func isSessionCookieSecure() bool {
-	isSecure := os.Getenv("USE_HTTPS")
-	if isSecure == "" {
-		return true
-	}
-
-	return isSecure == "true"
 }
