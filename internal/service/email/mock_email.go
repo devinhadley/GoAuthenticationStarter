@@ -1,4 +1,4 @@
-package user
+package email
 
 type MockEmailService struct {
 	SendMailFn func(toEmail string, subject string, body string) error

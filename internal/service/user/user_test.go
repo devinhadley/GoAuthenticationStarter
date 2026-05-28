@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/service/email"
 	"devinhadley/gobootstrapweb/internal/service/session"
 
 	"github.com/jackc/pgx/v5"
@@ -17,9 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/matthewhartstonge/argon2"
 )
-
-// TODO: Following the implemention of service level mocks, we should produce assertions that deactivate all sessions correctly called for password
-// reset flows.
 
 func TestSignUp(t *testing.T) {
 	t.Run("user can sign up", testUserSignUp)
@@ -873,7 +871,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 			authAttemptCreated = true
 			return nil
 		},
-	}, MockEmailService{
+	}, email.MockEmailService{
 		SendMailFn: func(toEmail string, subject string, body string) error {
 			prefix := "http://example.com/password-reset/?token="
 
@@ -936,7 +934,7 @@ func testCantCreatePasswordResetWithMalformedEmail(t *testing.T) {
 			t.Fatal("CreateLoginAuthAttempt should not be called for malformed email")
 			return nil
 		},
-	}, MockEmailService{
+	}, email.MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for malformed email")
 			return nil
@@ -977,7 +975,7 @@ func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
 			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited password reset request")
 			return nil
 		},
-	}, MockEmailService{
+	}, email.MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for rate limited password reset request")
 			return nil
@@ -1042,7 +1040,7 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 
 			return nil
 		},
-	}, MockEmailService{
+	}, email.MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for unknown email")
 			return nil
@@ -1087,7 +1085,7 @@ func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
 			t.Fatal("CreateLoginAuthAttempt should not be called for rate limited password reset request")
 			return nil
 		},
-	}, MockEmailService{
+	}, email.MockEmailService{
 		SendMailFn: func(string, string, string) error {
 			t.Fatal("SendMail should not be called for rate limited password reset request")
 			return nil
@@ -1289,10 +1287,10 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 
 func setupUserService(t *testing.T, mockedQueries mockQueries) *Service {
 	t.Helper()
-	return setupUserServiceWithEmail(t, mockedQueries, MockEmailService{}, "")
+	return setupUserServiceWithEmail(t, mockedQueries, email.MockEmailService{}, "")
 }
 
-func setupUserServiceWithEmail(t *testing.T, mockedQueries mockQueries, mockedEmailService MockEmailService, passwordResetURL string) *Service {
+func setupUserServiceWithEmail(t *testing.T, mockedQueries mockQueries, mockedEmailService email.MockEmailService, passwordResetURL string) *Service {
 	t.Helper()
 	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
 		return fn(&mockedQueries)

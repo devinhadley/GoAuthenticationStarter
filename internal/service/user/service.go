@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/email"
+	"devinhadley/gobootstrapweb/internal/service/email"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
