@@ -17,7 +17,27 @@ type sessionCreator interface {
 	CreateSession(ctx context.Context, userID int64) (session.Session, error)
 }
 
-func CreateSignUpHandler(userService *user.Service, sessionService sessionCreator) http.HandlerFunc {
+type signUpper interface {
+	SignUp(ctx context.Context, input user.AuthenticateBody) (user.User, error)
+}
+
+type logInner interface {
+	LogIn(ctx context.Context, input user.AuthenticateBody) (user.User, error)
+}
+
+type authenticatedPasswordResetter interface {
+	ResetPasswordForAuthenticatedUser(ctx context.Context, usr user.User, input user.AuthenticatedPasswordResetBody) error
+}
+
+type passwordResetRequester interface {
+	CreatePasswordResetRequest(ctx context.Context, reqBody user.CreatePasswordResetRequestBody) error
+}
+
+type tokenPasswordResetter interface {
+	ResetPasswordFromResetRequest(ctx context.Context, token string, input user.ResetPasswordFromResetRequestBody) error
+}
+
+func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticateBody
 		decoder := json.NewDecoder(r.Body)
@@ -53,7 +73,7 @@ func CreateSignUpHandler(userService *user.Service, sessionService sessionCreato
 	}
 }
 
-func CreateLoginHandler(userService *user.Service, sessionService sessionCreator) http.HandlerFunc {
+func CreateLoginHandler(userService logInner, sessionService sessionCreator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticateBody
 		decoder := json.NewDecoder(r.Body)
@@ -89,7 +109,7 @@ func CreateLoginHandler(userService *user.Service, sessionService sessionCreator
 	}
 }
 
-func CreateAuthenticatedPasswordResetHandler(userService *user.Service) http.HandlerFunc {
+func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordResetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticatedPasswordResetBody
 
@@ -129,7 +149,7 @@ func CreateAuthenticatedPasswordResetHandler(userService *user.Service) http.Han
 	}
 }
 
-func CreatePasswordResetRequestHandler(userService *user.Service) http.HandlerFunc {
+func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.CreatePasswordResetRequestBody
 
@@ -155,7 +175,7 @@ func CreatePasswordResetRequestHandler(userService *user.Service) http.HandlerFu
 	}
 }
 
-func CreateTokenPasswordResetHandler(userService *user.Service) http.HandlerFunc {
+func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 
