@@ -1,4 +1,5 @@
-package utils
+// Package web provides shared http utilities.
+package web
 
 import (
 	"encoding/json"
