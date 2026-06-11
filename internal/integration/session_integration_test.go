@@ -76,7 +76,7 @@ func testValidSessionAuthenticatesCorrectUser(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -125,7 +125,7 @@ func testNoSessionCookieContinuesUnauthenticated(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	res := performJsonRequest(sessionMiddleware, http.MethodGet, "/test", map[string]any{})
 
@@ -153,7 +153,7 @@ func testMalformedSessionCookieContinuesUnauthenticated(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -189,7 +189,7 @@ func testSessionIDNotFoundContinuesUnauthenticated(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -252,7 +252,7 @@ func testValidSessionButUserInactive(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -317,7 +317,7 @@ func testAbsoluteExpiration(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -385,7 +385,7 @@ func testIdleExpiration(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -437,7 +437,7 @@ func testSessionRotation(t *testing.T) {
 
 	makeSessionNeedRefresh(t, deps, createdSession.DBSession().ID)
 
-	handler := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, func(w http.ResponseWriter, r *http.Request) {
+	handler := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, err := middleware.UserFromContext(r.Context())
 		if err != nil {
 			t.Fatalf("wanted no error when getting user but got %v", err)
@@ -448,7 +448,7 @@ func testSessionRotation(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
@@ -581,7 +581,7 @@ func testUpdateLastSeenWhenThresholdReached(t *testing.T) {
 		web.WriteJSONResponse(w, http.StatusOK, map[string]any{"status": "ok"})
 	}
 
-	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, handler)
+	sessionMiddleware := middleware.CreateSessionMiddleware(&deps.userService, &deps.sessionService, http.HandlerFunc(handler))
 
 	sessionCookie := http.Cookie{
 		Name:     "id",

@@ -37,8 +37,8 @@ type tokenPasswordResetter interface {
 	ResetPasswordFromResetRequest(ctx context.Context, token string, input user.ResetPasswordFromResetRequestBody) error
 }
 
-func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticateBody
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -70,11 +70,11 @@ func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) h
 		web.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
 
 		w.WriteHeader(http.StatusNoContent)
-	}
+	})
 }
 
-func CreateLoginHandler(userService logInner, sessionService sessionCreator) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CreateLoginHandler(userService logInner, sessionService sessionCreator) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.AuthenticateBody
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -106,51 +106,45 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 		web.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
 
 		w.WriteHeader(http.StatusNoContent)
-	}
+	})
 }
 
-func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordResetter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var reqBody user.AuthenticatedPasswordResetBody
+func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordResetter) http.Handler {
+	return middleware.Requires(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var reqBody user.AuthenticatedPasswordResetBody
 
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		err := decoder.Decode(&reqBody)
-		if err != nil {
-			web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
-			return
-		}
-
-		// TODO: Make me middleware!
-		// Handler should exit early if no get user closure in context!
-		// That is views that expect authentication should never ever handle user not in context.
-		usr, err := middleware.UserFromContext(r.Context())
-		if err != nil {
-			if errors.Is(err, middleware.ErrUserNotInContext) {
-				web.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			err := decoder.Decode(&reqBody)
+			if err != nil {
+				web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 				return
 			}
-			log.Printf("when getting user for authenticated password reset: %v", err)
-			web.WriteAndReportInternalError(w)
-			return
-		}
 
-		err = userService.ResetPasswordForAuthenticatedUser(r.Context(), usr, reqBody)
-		if err != nil {
-			if writeAuthenticatedPasswordResetError(w, err) {
+			usr, err := middleware.UserFromContext(r.Context())
+			if err != nil {
+				log.Printf("when getting user for authenticated password reset: %v", err)
+				web.WriteAndReportInternalError(w)
 				return
 			}
-			web.WriteAndReportInternalError(w)
-			return
-		}
 
-		web.ClearSessionCookie(w)
-		w.WriteHeader(http.StatusNoContent)
-	}
+			err = userService.ResetPasswordForAuthenticatedUser(r.Context(), usr, reqBody)
+			if err != nil {
+				if writeAuthenticatedPasswordResetError(w, err) {
+					return
+				}
+				web.WriteAndReportInternalError(w)
+				return
+			}
+
+			web.ClearSessionCookie(w)
+			w.WriteHeader(http.StatusNoContent)
+		}), middleware.Authenticated)
 }
 
-func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var reqBody user.CreatePasswordResetRequestBody
 
 		decoder := json.NewDecoder(r.Body)
@@ -172,11 +166,11 @@ func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-	}
+	})
 }
 
-func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 
 		var reqBody user.ResetPasswordFromResetRequestBody
@@ -200,7 +194,7 @@ func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Han
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-	}
+	})
 }
 
 func writeSignUpError(w http.ResponseWriter, err error) bool {

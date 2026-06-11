@@ -47,9 +47,14 @@ func UserFromContext(ctx context.Context) (user.User, error) {
 	return getUser()
 }
 
+func isUserInContext(ctx context.Context) bool {
+	_, ok := ctx.Value(getUserContextKey).(GetUserFunc)
+	return ok
+}
+
 // CreateSessionMiddleware creates an http handler which uses the id (session id) cookie to expire sessions, rotate sessions, and authenticate the user.
-func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddlewareService, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddlewareService, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionCookie, err := r.Cookie("id")
 		if err != nil {
 			if err == http.ErrNoCookie {
@@ -108,12 +113,14 @@ func CreateSessionMiddleware(userService userGetter, sessionService sessionMiddl
 		}
 
 		// Add a closure to the context which allows lazy fetch of the current user.
+		// Note that get session only includes sessions for a user that is active.
+		// That is, an in active user will never be added to context.
 		requestCtx := r.Context()
 		ctx := withGetUser(requestCtx, createGetUserFunc(curSession.DBSession().UserID, userService, requestCtx))
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
-	}
+	})
 }
 
 func createGetUserFunc(userID int64, userService userGetter, ctx context.Context) func() (user.User, error) {
