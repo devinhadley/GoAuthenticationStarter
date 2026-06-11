@@ -89,7 +89,7 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 		},
 	}
 
-	handler := CreateSessionMiddleware(userService, sessionService, func(w http.ResponseWriter, r *http.Request) {
+	handler := CreateSessionMiddleware(userService, sessionService, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nextCalled = true
 		usr, err := UserFromContext(r.Context())
 		if err != nil {
@@ -99,7 +99,7 @@ func testRotateSessionErrorProceedsBestEffort(t *testing.T) {
 			t.Fatalf("expected user id 42, got %v", usr.DBUser().ID)
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil).WithContext(ctx)
 	req.AddCookie(&http.Cookie{Name: "id", Value: base64.StdEncoding.EncodeToString(originalID)})
@@ -169,13 +169,13 @@ func testExpiredSessionExpireErrorClearsCookie(t *testing.T) {
 		},
 	}
 
-	handler := CreateSessionMiddleware(userService, sessionService, func(w http.ResponseWriter, r *http.Request) {
+	handler := CreateSessionMiddleware(userService, sessionService, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nextCalled = true
 		if _, err := UserFromContext(r.Context()); !errors.Is(err, ErrUserNotInContext) {
 			t.Fatalf("expected no user in context, got %v", err)
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.AddCookie(&http.Cookie{Name: "id", Value: base64.StdEncoding.EncodeToString(originalID)})
@@ -264,7 +264,7 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 		},
 	}
 
-	handler := CreateSessionMiddleware(userService, sessionService, func(w http.ResponseWriter, r *http.Request) {
+	handler := CreateSessionMiddleware(userService, sessionService, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nextCalled = true
 		usr, err := UserFromContext(r.Context())
 		if err != nil {
@@ -274,7 +274,7 @@ func testUpdateLastSeenErrorStillAuthenticates(t *testing.T) {
 			t.Fatalf("expected user id 42, got %v", usr.DBUser().ID)
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.AddCookie(&http.Cookie{Name: "id", Value: base64.StdEncoding.EncodeToString(originalID)})
@@ -355,9 +355,9 @@ func testRotationSuccessUpdatesLastSeenWithRotatedID(t *testing.T) {
 		},
 	}
 
-	handler := CreateSessionMiddleware(userService, sessionService, func(w http.ResponseWriter, r *http.Request) {
+	handler := CreateSessionMiddleware(userService, sessionService, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.AddCookie(&http.Cookie{Name: "id", Value: base64.StdEncoding.EncodeToString(originalID)})

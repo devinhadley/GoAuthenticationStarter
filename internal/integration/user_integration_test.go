@@ -31,10 +31,10 @@ type userIntegrationDeps struct {
 	userService    *user.Service
 	sessionService *session.Service
 	emailService   *email.SliceEmailService
-	signUp         http.HandlerFunc
-	login          http.HandlerFunc
-	passwordReset  http.HandlerFunc
-	tokenReset     http.HandlerFunc
+	signUp         http.Handler
+	login          http.Handler
+	passwordReset  http.Handler
+	tokenReset     http.Handler
 }
 
 func TestSignUpIntegration(t *testing.T) {
@@ -74,6 +74,7 @@ func TestPasswordResetIntegration(t *testing.T) {
 	t.Run("password reset succeeds with authenticated user and deactivates sessions", testAuthenticatedPasswordResetSucceeds)
 	t.Run("password reset fails with incorrect password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWrongPassword)
 	t.Run("password reset fails with weak password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWeakPassword)
+	t.Run("password reset fails without authenticated user", testAuthenticatedPasswordResetFailsWithoutAuthenticatedUser)
 
 	// token based password reset.
 	t.Run("can create password reset request", testCanCreatePasswordResetRequest)
@@ -806,6 +807,27 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 	if activeCountAfter != 1 {
 		t.Fatalf("got %d active sessions after reset, want 1", activeCountAfter)
 	}
+}
+
+func testAuthenticatedPasswordResetFailsWithoutAuthenticatedUser(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
+
+	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+		"password":    "current-password-12345",
+		"newPassword": "new-password-12345",
+	})
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr != (apiErrorResponse{}) {
+		t.Fatalf("got error response %+v, want empty response", gotErr)
+	}
+
+	assertNoSessionCookie(t, rec)
 }
 
 func testCanCreatePasswordResetRequest(t *testing.T) {

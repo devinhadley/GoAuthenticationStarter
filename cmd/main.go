@@ -10,6 +10,7 @@ import (
 
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/handlers"
+	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/email"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
@@ -57,8 +58,11 @@ func main() {
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
 	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))
+	mux.Handle("POST /user/password-reset", handlers.CreateAuthenticatedPasswordResetHandler(userService))
 	mux.Handle("POST /password-reset", handlers.CreatePasswordResetRequestHandler(userService))
 	mux.Handle("PUT /password-reset", handlers.CreateTokenPasswordResetHandler(userService))
 
-	http.ListenAndServe(":8080", mux)
+	muxWithMiddleware := middleware.CreateSessionMiddleware(userService, sessionService, mux)
+
+	http.ListenAndServe(":8080", muxWithMiddleware)
 }
