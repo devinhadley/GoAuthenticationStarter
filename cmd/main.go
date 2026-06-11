@@ -58,6 +58,7 @@ func main() {
 
 	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
 	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))
+	mux.Handle("POST /user/password-reset", handlers.CreateAuthenticatedPasswordResetHandler(userService))
 	mux.Handle("POST /password-reset", handlers.CreatePasswordResetRequestHandler(userService))
 	mux.Handle("PUT /password-reset", handlers.CreateTokenPasswordResetHandler(userService))
 
