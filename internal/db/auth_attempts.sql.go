@@ -44,8 +44,8 @@ SELECT COUNT(*)
 FROM auth_attempts
 WHERE action = $1
 AND email = $2
-AND outcome = 'failed'
 AND created_at >= $3
+AND outcome = 'failed'
 `
 
 type CountFailedAuthAttemptsSinceParams struct {

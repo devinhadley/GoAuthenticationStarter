@@ -13,9 +13,8 @@ CREATE TABLE users (
 
 );
 
--- TODO: Lets store a hash of the session id i.e. sha 256.
 CREATE TABLE sessions (
-    id BYTEA PRIMARY KEY CHECK (octet_length(id) = 16),
+    id BYTEA PRIMARY KEY CHECK (octet_length(id) = 32), -- SHA-256 of session id
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
@@ -11,8 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
-
-// TODO: Lets SHA-256 hash session on creation and before retrieval!
 
 type SessionQueries interface {
 	CreateSession(ctx context.Context, arg db.CreateSessionParams) (db.Session, error)
@@ -29,6 +28,11 @@ type Service struct {
 	queries SessionQueries
 }
 
+type CreateSessionResult struct {
+	Session Session
+	RawID   []byte
+}
+
 func NewService(queries SessionQueries) *Service {
 	return &Service{
 		queries: queries,
@@ -42,42 +46,48 @@ var (
 
 const MaxNumberOfActiveSessions = 10
 
-func (s *Service) CreateSession(ctx context.Context, userID int64) (Session, error) {
+func (s *Service) CreateSession(ctx context.Context, userID int64) (CreateSessionResult, error) {
 	numSessions, err := s.queries.GetSessionCountByUser(ctx, userID)
 	if err != nil {
-		return Session{}, fmt.Errorf("getting session count: %w", err)
+		return CreateSessionResult{}, fmt.Errorf("getting session count: %w", err)
 	}
 
 	if numSessions >= MaxNumberOfActiveSessions {
 		err = s.queries.DeactivateLeastRecentlyUsedSessionForUser(ctx, userID)
 		if err != nil {
-			return Session{}, fmt.Errorf("deactivating least recently used session: %w", err)
+			return CreateSessionResult{}, fmt.Errorf("deactivating least recently used session: %w", err)
 		}
 	}
 
 	sessionID, err := generateSessionID()
 	if err != nil {
-		return Session{}, fmt.Errorf("generating session id: %w", err)
+		return CreateSessionResult{}, fmt.Errorf("generating session id: %w", err)
 	}
 
+	sum := sha256.Sum256(sessionID)
+	idHash := sum[:]
+
 	session, err := s.queries.CreateSession(ctx, db.CreateSessionParams{
-		ID:     sessionID,
+		ID:     idHash,
 		UserID: userID,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "sessions_user_id_fkey" {
-			return Session{}, ErrUserNotFound
+			return CreateSessionResult{}, ErrUserNotFound
 		}
 
-		return Session{}, fmt.Errorf("creating session: %w", err)
+		return CreateSessionResult{}, fmt.Errorf("creating session: %w", err)
 	}
 
-	return SessionFromDB(session), nil
+	return CreateSessionResult{Session: SessionFromDB(session), RawID: sessionID}, nil
 }
 
 func (s *Service) GetSession(ctx context.Context, sessionID []byte) (Session, error) {
-	session, err := s.queries.GetActiveSession(ctx, sessionID)
+	sum := sha256.Sum256(sessionID)
+	idHash := sum[:]
+
+	session, err := s.queries.GetActiveSession(ctx, idHash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Session{}, ErrSessionNotFound
@@ -113,10 +123,11 @@ func (s *Service) RotateSession(ctx context.Context, sessionID []byte) (Session,
 	if err != nil {
 		return Session{}, err
 	}
+	rotatedSessionIDHash := sha256.Sum256(rotatedSessionID)
 
 	updatedSession, err := s.queries.UpdateSessionIDAndRefreshedAt(ctx, db.UpdateSessionIDAndRefreshedAtParams{
 		ID:   sessionID,
-		ID_2: rotatedSessionID,
+		ID_2: rotatedSessionIDHash[:],
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -126,6 +137,7 @@ func (s *Service) RotateSession(ctx context.Context, sessionID []byte) (Session,
 		return Session{}, fmt.Errorf("rotating session: %w", err)
 	}
 
+	updatedSession.ID = rotatedSessionID
 	return SessionFromDB(updatedSession), nil
 }
 

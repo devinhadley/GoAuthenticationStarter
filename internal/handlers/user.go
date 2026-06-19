@@ -14,7 +14,7 @@ import (
 )
 
 type sessionCreator interface {
-	CreateSession(ctx context.Context, userID int64) (session.Session, error)
+	CreateSession(ctx context.Context, userID int64) (session.CreateSessionResult, error)
 }
 
 type signUpper interface {
@@ -67,7 +67,7 @@ func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) h
 			web.WriteAndReportInternalError(w)
 			return
 		}
-		web.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
+		web.AddSessionToCookie(w, newSession.RawID, newSession.Session.GetAbsoluteExpiration())
 
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -103,7 +103,7 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 			web.WriteAndReportInternalError(w)
 			return
 		}
-		web.AddSessionToCookie(w, newSession.DBSession().ID, newSession.GetAbsoluteExpiration())
+		web.AddSessionToCookie(w, newSession.RawID, newSession.Session.GetAbsoluteExpiration())
 
 		w.WriteHeader(http.StatusNoContent)
 	})
