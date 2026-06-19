@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"testing"
 	"time"
@@ -68,8 +69,8 @@ func testCreateValidSession(t *testing.T) {
 				t.Fatalf("CreateSession got user id %v, want %v", arg.UserID, userID)
 			}
 
-			if len(arg.ID) != 16 {
-				t.Fatalf("CreateSession got id length %d, want %d", len(arg.ID), 16)
+			if len(arg.ID) != 32 {
+				t.Fatalf("CreateSession got id length %d, want %d", len(arg.ID), 32)
 			}
 
 			return db.Session{
@@ -83,23 +84,27 @@ func testCreateValidSession(t *testing.T) {
 		},
 	})
 
-	session, err := sessionService.CreateSession(ctx, userID)
+	result, err := sessionService.CreateSession(ctx, userID)
 	if err != nil {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 
-	rawSession := session.DBSession()
+	rawSession := result.Session.DBSession()
 
 	if rawSession.UserID != userID {
 		t.Fatalf("got user id %v, want %v", rawSession.UserID, userID)
 	}
 
-	if len(rawSession.ID) != 16 {
-		t.Fatalf("got id length %d, want %d", len(rawSession.ID), 16)
+	if len(rawSession.ID) != 32 {
+		t.Fatalf("got id length %d, want %d", len(rawSession.ID), 32)
 	}
 
 	if !bytes.Equal(rawSession.ID, createSessionArg.ID) {
 		t.Fatal("returned session id does not match id passed to CreateSession")
+	}
+
+	if len(result.RawID) != 16 {
+		t.Fatalf("got raw id length %d, want %d", len(result.RawID), 16)
 	}
 }
 
@@ -240,8 +245,8 @@ func testRotateSession(t *testing.T) {
 				t.Fatalf("UpdateSessionIDByID got id %v, want %v", arg.ID, originalID)
 			}
 
-			if len(arg.ID_2) != 16 {
-				t.Fatalf("UpdateSessionIDByID got rotated id length %d, want %d", len(arg.ID_2), 16)
+			if len(arg.ID_2) != 32 {
+				t.Fatalf("UpdateSessionIDByID got rotated id length %d, want %d", len(arg.ID_2), 32)
 			}
 
 			return db.Session{ID: arg.ID_2}, nil
@@ -259,8 +264,9 @@ func testRotateSession(t *testing.T) {
 		t.Fatalf("got rotated id length %d, want %d", len(rawUpdatedSession.ID), 16)
 	}
 
-	if !bytes.Equal(rawUpdatedSession.ID, updateSessionIDArg.ID_2) {
-		t.Fatal("returned rotated session id does not match id passed to UpdateSessionIDByID")
+	rotatedIDHash := sha256.Sum256(rawUpdatedSession.ID)
+	if !bytes.Equal(rotatedIDHash[:], updateSessionIDArg.ID_2) {
+		t.Fatal("returned rotated session id hash does not match id passed to UpdateSessionIDByID")
 	}
 
 	if bytes.Equal(rawUpdatedSession.ID, originalID) {
@@ -455,8 +461,9 @@ func testGetSessionReturnsError(t *testing.T) {
 				t.Fatal("GetSessionByID called with unexpected context")
 			}
 
-			if !bytes.Equal(id, sessionID) {
-				t.Fatalf("GetSessionByID got id %v, want %v", id, sessionID)
+			sum := sha256.Sum256(sessionID)
+			if !bytes.Equal(id, sum[:]) {
+				t.Fatalf("GetSessionByID got id %v, want %v", id, sum[:])
 			}
 
 			return db.Session{}, wantErr

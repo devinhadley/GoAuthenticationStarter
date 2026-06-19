@@ -614,8 +614,8 @@ func testGetUserSucceedsWithAuthenticatedUser(t *testing.T) {
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
-		Expires:  requestSession.GetAbsoluteExpiration(),
+		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
+		Expires:  requestSession.Session.GetAbsoluteExpiration(),
 		HttpOnly: true,
 		Path:     "/",
 		Secure:   false,
@@ -656,7 +656,7 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 		t.Fatalf("failed to create test user: %v", err)
 	}
 
-	var requestSession session.Session
+	var requestSession session.CreateSessionResult
 	for range 3 {
 		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
 		if err != nil {
@@ -666,8 +666,8 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
-		Expires:  requestSession.GetAbsoluteExpiration(),
+		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
+		Expires:  requestSession.Session.GetAbsoluteExpiration(),
 		HttpOnly: true,
 		Path:     "/",
 		Secure:   false,
@@ -745,8 +745,8 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
-		Expires:  requestSession.GetAbsoluteExpiration(),
+		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
+		Expires:  requestSession.Session.GetAbsoluteExpiration(),
 		HttpOnly: true,
 		Path:     "/",
 		Secure:   false,
@@ -812,8 +812,8 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 
 	sessionCookie := http.Cookie{
 		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
-		Expires:  requestSession.GetAbsoluteExpiration(),
+		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
+		Expires:  requestSession.Session.GetAbsoluteExpiration(),
 		HttpOnly: true,
 		Path:     "/",
 		Secure:   false,

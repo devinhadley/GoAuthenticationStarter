@@ -3,7 +3,7 @@ package session
 import "context"
 
 type MockService struct {
-	CreateSessionFn                func(ctx context.Context, userID int64) (Session, error)
+	CreateSessionFn                func(ctx context.Context, userID int64) (CreateSessionResult, error)
 	GetSessionFn                   func(ctx context.Context, sessionID []byte) (Session, error)
 	ExpireSessionFn                func(ctx context.Context, sessionID []byte) error
 	UpdateLastSeenFn               func(ctx context.Context, s Session) error
@@ -11,12 +11,12 @@ type MockService struct {
 	DeactivateAllSessionsForUserFn func(ctx context.Context, userID int64) error
 }
 
-func (s MockService) CreateSession(ctx context.Context, userID int64) (Session, error) {
+func (s MockService) CreateSession(ctx context.Context, userID int64) (CreateSessionResult, error) {
 	if s.CreateSessionFn != nil {
 		return s.CreateSessionFn(ctx, userID)
 	}
 
-	return Session{}, nil
+	return CreateSessionResult{}, nil
 }
 
 func (s MockService) GetSession(ctx context.Context, sessionID []byte) (Session, error) {
