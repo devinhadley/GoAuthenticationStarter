@@ -109,11 +109,11 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 	})
 }
 
-func CreateGetUserHandler(userService user.Service) http.Handler {
+func CreateGetUserHandler() http.Handler {
 	return middleware.Requires(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		usr, err := middleware.UserFromContext(r.Context())
 		if err != nil {
-			log.Printf("when getting user from context for get user endpoint: ", err)
+			log.Printf("when getting user from context for get user endpoint: %v", err)
 			web.WriteAndReportInternalError(w)
 			return
 		}

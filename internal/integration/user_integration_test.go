@@ -14,8 +14,7 @@ import (
 	"time"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/handlers"
-	"devinhadley/gobootstrapweb/internal/middleware"
+	"devinhadley/gobootstrapweb/internal/server"
 	"devinhadley/gobootstrapweb/internal/service/email"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
@@ -31,11 +30,7 @@ type userIntegrationDeps struct {
 	userService    *user.Service
 	sessionService *session.Service
 	emailService   *email.SliceEmailService
-	signUp         http.Handler
-	login          http.Handler
-	getUser        http.Handler
-	passwordReset  http.Handler
-	tokenReset     http.Handler
+	handler        http.Handler
 }
 
 func TestSignUpIntegration(t *testing.T) {
@@ -104,7 +99,7 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 		"password": "example-password",
 	}
 
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", input)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
 	}
@@ -151,12 +146,12 @@ func testSignUpDuplicateEmail(t *testing.T) {
 		"password": "example-password",
 	}
 
-	first := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
+	first := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", input)
 	if first.Code != http.StatusNoContent {
 		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusNoContent)
 	}
 
-	second := performJsonRequest(deps.signUp, http.MethodPost, "/signup", input)
+	second := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", input)
 	if second.Code != http.StatusBadRequest {
 		t.Fatalf("second sign up got status %d, want %d", second.Code, http.StatusBadRequest)
 	}
@@ -175,7 +170,7 @@ func testSignUpDuplicateEmail(t *testing.T) {
 func testSignUpRejectsBlankEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", map[string]string{
 		"email":    "",
 		"password": "example-password",
 	})
@@ -199,7 +194,7 @@ func testSignUpRejectsBlankPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
 	email := "blank-password@example.com"
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", map[string]string{
 		"email":    email,
 		"password": "",
 	})
@@ -219,7 +214,7 @@ func testSignUpRejectsBlankPassword(t *testing.T) {
 func testSignUpRejectsCommonPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", map[string]string{
 		"email":    "test@example.com",
 		"password": "123456789101112",
 	})
@@ -242,7 +237,7 @@ func testSignUpRejectsCommonPassword(t *testing.T) {
 func testSignUpRejectsShortPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", map[string]string{
 		"email":    "short-password@example.com",
 		"password": "12345678901",
 	})
@@ -265,7 +260,7 @@ func testSignUpRejectsShortPassword(t *testing.T) {
 func testSignUpRejectsLongPassword(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", map[string]string{
 		"email":    "long-password@example.com",
 		"password": strings.Repeat("a", 257),
 	})
@@ -289,7 +284,7 @@ func testSignUpRejectsInvalidEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
 	email := "invalid"
-	rec := performJsonRequest(deps.signUp, http.MethodPost, "/signup", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", map[string]string{
 		"email":    email,
 		"password": "example-password",
 	})
@@ -322,7 +317,7 @@ func testSuccessfulLogin(t *testing.T) {
 		t.Fatalf("failed to seed user: %v", err)
 	}
 
-	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/login", map[string]string{
 		"email":    email,
 		"password": "example-password",
 	})
@@ -358,7 +353,7 @@ func testLogInRejectsInvalidEmail(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	email := "invalid"
 
-	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/login", map[string]string{
 		"email":    email,
 		"password": "example-password",
 	})
@@ -384,7 +379,7 @@ func testLogInReturnsUnauthorizedWhenUserDoesNotExist(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	email := "missing@example.com"
 
-	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/login", map[string]string{
 		"email":    email,
 		"password": "example-password",
 	})
@@ -424,7 +419,7 @@ func testLogInReturnsUnauthorizedWhenPasswordIsIncorrect(t *testing.T) {
 		t.Fatalf("failed to seed user: %v", err)
 	}
 
-	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/login", map[string]string{
 		"email":    email,
 		"password": "incorrect-password",
 	})
@@ -485,7 +480,7 @@ func testLogInReturnsTooManyRequestsWhenRateLimited(t *testing.T) {
 		}
 	}
 
-	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/login", map[string]string{
 		"email":    email,
 		"password": "example-password",
 	})
@@ -564,7 +559,7 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 		t.Fatalf("failed to age one failed auth attempt outside rate-limit window: %v", err)
 	}
 
-	rec := performJsonRequest(deps.login, http.MethodPost, "/login", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/login", map[string]string{
 		"email":    email,
 		"password": password,
 	})
@@ -626,7 +621,7 @@ func testGetUserSucceedsWithAuthenticatedUser(t *testing.T) {
 		Secure:   false,
 	}
 
-	rec := performJsonRequest(deps.getUser, http.MethodGet, "/whoami", map[string]any{}, &sessionCookie)
+	rec := performJsonRequest(deps.handler, http.MethodGet, "/user", map[string]any{}, &sessionCookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -669,8 +664,6 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 		}
 	}
 
-	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
-
 	sessionCookie := http.Cookie{
 		Name:     "id",
 		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
@@ -680,7 +673,7 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 		Secure:   false,
 	}
 
-	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    currentPassword,
 		"newPassword": newPassword,
 	}, &sessionCookie)
@@ -750,8 +743,6 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 		t.Fatalf("failed to create active session: %v", err)
 	}
 
-	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
-
 	sessionCookie := http.Cookie{
 		Name:     "id",
 		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
@@ -761,7 +752,7 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 		Secure:   false,
 	}
 
-	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    incorrectPassword,
 		"newPassword": newPassword,
 	}, &sessionCookie)
@@ -819,8 +810,6 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 		t.Fatalf("failed to create active session: %v", err)
 	}
 
-	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
-
 	sessionCookie := http.Cookie{
 		Name:     "id",
 		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
@@ -830,7 +819,7 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 		Secure:   false,
 	}
 
-	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    currentPassword,
 		"newPassword": commonNewPassword,
 	}, &sessionCookie)
@@ -865,9 +854,8 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 
 func testAuthenticatedPasswordResetFailsWithoutAuthenticatedUser(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
-	authenticatedResetHandler := middleware.CreateSessionMiddleware(deps.userService, deps.sessionService, handlers.CreateAuthenticatedPasswordResetHandler(deps.userService))
 
-	rec := performJsonRequest(authenticatedResetHandler, http.MethodPost, "/user/password", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    "current-password-12345",
 		"newPassword": "new-password-12345",
 	})
@@ -899,7 +887,7 @@ func testCanCreatePasswordResetRequest(t *testing.T) {
 		t.Fatalf("failed to create test user: %v", err)
 	}
 
-	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/password-reset", map[string]string{
 		"email": email,
 	})
 
@@ -940,7 +928,7 @@ func testCreatingPasswordResetRequestForUnknownUserReturns204(t *testing.T) {
 
 	email := "missing-password-reset@example.com"
 
-	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/password-reset", map[string]string{
 		"email": email,
 	})
 
@@ -1005,7 +993,7 @@ func testCreatingThreePasswordResetsIn15MinutesShowsRateLimitError(t *testing.T)
 		t.Fatalf("failed to seed second successful password reset auth attempt: %v", err)
 	}
 
-	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/password-reset", map[string]string{
 		"email": email,
 	})
 
@@ -1094,7 +1082,7 @@ func testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError(t *testing.T) {
 	updateAuthAttemptsCreatedAtForEmailAndActionAndOutcome(t, deps.pool, email, db.AuthActionPasswordReset, db.AuthOutcomeSucceeded, seededCreatedAt)
 	updatePasswordResetReqCreatedAtForUserID(t, deps.pool, createdUser.DBUser().ID, seededCreatedAt)
 
-	rec := performJsonRequest(deps.passwordReset, http.MethodPost, "/password-reset", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/password-reset", map[string]string{
 		"email": email,
 	})
 
@@ -1157,7 +1145,7 @@ func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testi
 		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
 	}
 
-	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
 		"newPassword": newPassword,
 	})
 	if rec.Code != http.StatusNoContent {
@@ -1222,7 +1210,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		t.Fatalf("CreatePasswordResetRequest returned error: %v", err)
 	}
 
-	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token=incorrect-reset-token", map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/password-reset?token=incorrect-reset-token", map[string]string{
 		"newPassword": newPassword,
 	})
 
@@ -1298,7 +1286,7 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 		t.Fatalf("failed to create first active session: %v", err)
 	}
 
-	rec := performJsonRequest(deps.tokenReset, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
 		"newPassword": secondNewPassword,
 	})
 
@@ -1336,17 +1324,15 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	sessionService := session.NewService(queries)
 	userService := user.NewService(queries, txnGenerator, sliceEmailService, sessionService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
 
+	handler := server.NewMux(userService, sessionService)
+
 	return userIntegrationDeps{
 		pool:           pool,
 		queries:        queries,
 		userService:    userService,
 		sessionService: sessionService,
 		emailService:   sliceEmailService,
-		signUp:         handlers.CreateSignUpHandler(userService, sessionService),
-		login:          handlers.CreateLoginHandler(userService, sessionService),
-		getUser:        middleware.CreateSessionMiddleware(userService, sessionService, handlers.CreateGetUserHandler(*userService)),
-		passwordReset:  handlers.CreatePasswordResetRequestHandler(userService),
-		tokenReset:     handlers.CreateTokenPasswordResetHandler(userService),
+		handler:        handler,
 	}
 }
 

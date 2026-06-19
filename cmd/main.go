@@ -9,8 +9,7 @@ import (
 	"strings"
 
 	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/handlers"
-	"devinhadley/gobootstrapweb/internal/middleware"
+	"devinhadley/gobootstrapweb/internal/server"
 	"devinhadley/gobootstrapweb/internal/service/email"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
@@ -40,8 +39,6 @@ func main() {
 
 	queries := db.New(dbConPool)
 
-	mux := http.NewServeMux()
-
 	isProd := strings.ToLower(getEnvOrPanic("IS_PROD")) != "false"
 	var mailService email.Service
 	if isProd {
@@ -56,13 +53,5 @@ func main() {
 	sessionService := session.NewService(queries)
 	userService := user.NewService(queries, txnGenerator, mailService, sessionService, user.Config{PasswordResetURL: passwordResetURL})
 
-	mux.Handle("POST /signup", handlers.CreateSignUpHandler(userService, sessionService))
-	mux.Handle("POST /login", handlers.CreateLoginHandler(userService, sessionService))
-	mux.Handle("POST /user/password-reset", handlers.CreateAuthenticatedPasswordResetHandler(userService))
-	mux.Handle("POST /password-reset", handlers.CreatePasswordResetRequestHandler(userService))
-	mux.Handle("PUT /password-reset", handlers.CreateTokenPasswordResetHandler(userService))
-
-	muxWithMiddleware := middleware.CreateSessionMiddleware(userService, sessionService, mux)
-
-	http.ListenAndServe(":8080", muxWithMiddleware)
+	http.ListenAndServe(":8080", server.NewMux(userService, sessionService))
 }
