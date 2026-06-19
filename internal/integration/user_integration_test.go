@@ -33,6 +33,7 @@ type userIntegrationDeps struct {
 	emailService   *email.SliceEmailService
 	signUp         http.Handler
 	login          http.Handler
+	getUser        http.Handler
 	passwordReset  http.Handler
 	tokenReset     http.Handler
 }
@@ -63,6 +64,14 @@ func TestLogInIntegration(t *testing.T) {
 	t.Run("returns 429 when rate limited and doesnt create session / auth attempt", testLogInReturnsTooManyRequestsWhenRateLimited)
 	t.Run("login succeeds when one of ten failed attempts is older than ten minutes", testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow)
 	t.Run("test rejects invalid email", testLogInRejectsInvalidEmail)
+}
+
+func TestGetUserIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests in short mode")
+	}
+
+	t.Run("get user succeeds with authenticated user", testGetUserSucceedsWithAuthenticatedUser)
 }
 
 func TestPasswordResetIntegration(t *testing.T) {
@@ -589,6 +598,51 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 	}
 
 	assertSessionCookieExists(t, rec)
+}
+
+func testGetUserSucceedsWithAuthenticatedUser(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    "whoami@example.com",
+		Password: "example-password-12345",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to create test session: %v", err)
+	}
+
+	sessionCookie := http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.DBSession().ID),
+		Expires:  requestSession.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	rec := performJsonRequest(deps.getUser, http.MethodGet, "/whoami", map[string]any{}, &sessionCookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got getUserResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("failed to decode whoami response: %v", err)
+	}
+
+	if got.ID != createdUser.DBUser().ID {
+		t.Fatalf("got user id %d, want %d", got.ID, createdUser.DBUser().ID)
+	}
+
+	if got.Email != createdUser.DBUser().Email {
+		t.Fatalf("got email %q, want %q", got.Email, createdUser.DBUser().Email)
+	}
 }
 
 func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
@@ -1290,6 +1344,7 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 		emailService:   sliceEmailService,
 		signUp:         handlers.CreateSignUpHandler(userService, sessionService),
 		login:          handlers.CreateLoginHandler(userService, sessionService),
+		getUser:        middleware.CreateSessionMiddleware(userService, sessionService, handlers.CreateGetUserHandler(*userService)),
 		passwordReset:  handlers.CreatePasswordResetRequestHandler(userService),
 		tokenReset:     handlers.CreateTokenPasswordResetHandler(userService),
 	}
@@ -1299,6 +1354,11 @@ type apiErrorResponse struct {
 	Error    string `json:"error"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type getUserResponse struct {
+	ID    int64  `json:"id"`
+	Email string `json:"email"`
 }
 
 func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) apiErrorResponse {

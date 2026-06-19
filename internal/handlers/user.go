@@ -109,6 +109,22 @@ func CreateLoginHandler(userService logInner, sessionService sessionCreator) htt
 	})
 }
 
+func CreateGetUserHandler(userService user.Service) http.Handler {
+	return middleware.Requires(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		usr, err := middleware.UserFromContext(r.Context())
+		if err != nil {
+			log.Printf("when getting user from context for get user endpoint: ", err)
+			web.WriteAndReportInternalError(w)
+			return
+		}
+
+		web.WriteJSONResponse(w, http.StatusOK, map[string]any{
+			"id":    usr.DBUser().ID,
+			"email": usr.DBUser().Email,
+		})
+	}), middleware.Authenticated)
+}
+
 func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordResetter) http.Handler {
 	return middleware.Requires(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
