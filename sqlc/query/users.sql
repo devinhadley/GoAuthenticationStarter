@@ -22,3 +22,8 @@ WHERE id = $1;
 UPDATE users
 SET password_hash = $2
 WHERE id = $1;
+
+-- name: UpdateEmail :exec
+UPDATE users
+SET email = $2
+WHERE id = $1;

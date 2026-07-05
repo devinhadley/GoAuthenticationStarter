@@ -11,11 +11,11 @@ AND email = $2
 AND created_at >= $3
 AND outcome = 'failed';
 
--- name: CountAuthAttemptsForPassResetReq :one
-SELECT 
+-- name: CountTieredAuthAttempts :one
+SELECT
   COUNT(*) AS old_count,
   COUNT(*) FILTER (WHERE created_at >= (sqlc.arg(recent_date))) AS recent_count
 FROM auth_attempts
-WHERE action = 'password_reset'
+WHERE action = sqlc.arg(action)
   AND email = sqlc.arg(email)
   AND created_at >= sqlc.arg(old_date); -- long entries range will include short entries...

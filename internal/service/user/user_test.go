@@ -822,15 +822,15 @@ func testCanRequestPasswordReset(t *testing.T) {
 
 	passwordResetURL := "http://example.com/password-reset"
 	userService := setupUserServiceWithEmail(t, mockQueries{
-		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+		CountTieredAuthAttemptsFn: func(callCtx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error) {
 			if callCtx != ctx {
-				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+				t.Fatal("CountTieredAuthAttempts called with unexpected context")
 			}
 			if arg.Email != normalizedEmail {
-				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, normalizedEmail)
+				t.Fatalf("CountTieredAuthAttempts got email %q, want %q", arg.Email, normalizedEmail)
 			}
 			countChecked = true
-			return db.CountAuthAttemptsForPassResetReqRow{}, nil
+			return db.CountTieredAuthAttemptsRow{}, nil
 		},
 		GetUserByEmailFn: func(callCtx context.Context, email string) (db.User, error) {
 			if callCtx != ctx {
@@ -898,7 +898,7 @@ func testCanRequestPasswordReset(t *testing.T) {
 	}
 
 	if !countChecked {
-		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+		t.Fatal("CountTieredAuthAttempts was not called")
 	}
 	if !gotUser {
 		t.Fatal("GetUserByEmail was not called")
@@ -918,9 +918,9 @@ func testCantCreatePasswordResetWithMalformedEmail(t *testing.T) {
 	ctx := context.Background()
 
 	userService := setupUserServiceWithEmail(t, mockQueries{
-		CountAuthAttemptsForPassResetReqFn: func(context.Context, db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
-			t.Fatal("CountAuthAttemptsForPassResetReq should not be called for malformed email")
-			return db.CountAuthAttemptsForPassResetReqRow{}, nil
+		CountTieredAuthAttemptsFn: func(context.Context, db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error) {
+			t.Fatal("CountTieredAuthAttempts should not be called for malformed email")
+			return db.CountTieredAuthAttemptsRow{}, nil
 		},
 		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for malformed email")
@@ -953,15 +953,15 @@ func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
 	rateLimitChecked := false
 
 	userService := setupUserServiceWithEmail(t, mockQueries{
-		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+		CountTieredAuthAttemptsFn: func(callCtx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error) {
 			if callCtx != ctx {
-				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+				t.Fatal("CountTieredAuthAttempts called with unexpected context")
 			}
 			if arg.Email != inputEmail {
-				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+				t.Fatalf("CountTieredAuthAttempts got email %q, want %q", arg.Email, inputEmail)
 			}
 			rateLimitChecked = true
-			return db.CountAuthAttemptsForPassResetReqRow{OldCount: 3, RecentCount: 0}, nil
+			return db.CountTieredAuthAttemptsRow{OldCount: 3, RecentCount: 0}, nil
 		},
 		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for rate limited password reset request")
@@ -988,7 +988,7 @@ func testCantRequestMoreThanThreePasswordResetsIn120Minutes(t *testing.T) {
 	}
 
 	if !rateLimitChecked {
-		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+		t.Fatal("CountTieredAuthAttempts was not called")
 	}
 }
 
@@ -998,15 +998,15 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 	rateLimitChecked := false
 
 	userService := setupUserServiceWithEmail(t, mockQueries{
-		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+		CountTieredAuthAttemptsFn: func(callCtx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error) {
 			if callCtx != ctx {
-				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+				t.Fatal("CountTieredAuthAttempts called with unexpected context")
 			}
 			if arg.Email != inputEmail {
-				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+				t.Fatalf("CountTieredAuthAttempts got email %q, want %q", arg.Email, inputEmail)
 			}
 			rateLimitChecked = true
-			return db.CountAuthAttemptsForPassResetReqRow{}, nil
+			return db.CountTieredAuthAttemptsRow{}, nil
 		},
 		GetUserByEmailFn: func(callCtx context.Context, email string) (db.User, error) {
 			if callCtx != ctx {
@@ -1053,7 +1053,7 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 	}
 
 	if !rateLimitChecked {
-		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+		t.Fatal("CountTieredAuthAttempts was not called")
 	}
 }
 
@@ -1063,15 +1063,15 @@ func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
 	rateLimitChecked := false
 
 	userService := setupUserServiceWithEmail(t, mockQueries{
-		CountAuthAttemptsForPassResetReqFn: func(callCtx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
+		CountTieredAuthAttemptsFn: func(callCtx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error) {
 			if callCtx != ctx {
-				t.Fatal("CountAuthAttemptsForPassResetReq called with unexpected context")
+				t.Fatal("CountTieredAuthAttempts called with unexpected context")
 			}
 			if arg.Email != inputEmail {
-				t.Fatalf("CountAuthAttemptsForPassResetReq got email %q, want %q", arg.Email, inputEmail)
+				t.Fatalf("CountTieredAuthAttempts got email %q, want %q", arg.Email, inputEmail)
 			}
 			rateLimitChecked = true
-			return db.CountAuthAttemptsForPassResetReqRow{OldCount: 0, RecentCount: 2}, nil
+			return db.CountTieredAuthAttemptsRow{OldCount: 0, RecentCount: 2}, nil
 		},
 		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
 			t.Fatal("GetUserByEmail should not be called for rate limited password reset request")
@@ -1098,7 +1098,7 @@ func testCantRequestMoreThanTwoPasswordResetsIn15Minutes(t *testing.T) {
 	}
 
 	if !rateLimitChecked {
-		t.Fatal("CountAuthAttemptsForPassResetReq was not called")
+		t.Fatal("CountTieredAuthAttempts was not called")
 	}
 }
 
@@ -1305,15 +1305,18 @@ func needsImplemented(t *testing.T) {
 }
 
 type mockQueries struct {
-	CreateUserFn                       func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
-	GetUserByEmailFn                   func(ctx context.Context, email string) (db.User, error)
-	GetUserByIDFn                      func(ctx context.Context, id int64) (db.User, error)
-	CountFailedAuthAttemptsSinceFn     func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
-	CountAuthAttemptsForPassResetReqFn func(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
-	CreateLoginAuthAttemptFn           func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
-	CreatePasswordResetRequestFn       func(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
-	ConsumePasswordResetRequestFn      func(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
-	UpdatePasswordHashFn               func(ctx context.Context, arg db.UpdatePasswordHashParams) error
+	CreateUserFn                   func(ctx context.Context, arg db.CreateUserParams) (db.User, error)
+	GetUserByEmailFn               func(ctx context.Context, email string) (db.User, error)
+	GetUserByIDFn                  func(ctx context.Context, id int64) (db.User, error)
+	CountFailedAuthAttemptsSinceFn func(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
+	CountTieredAuthAttemptsFn      func(ctx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error)
+	CreateLoginAuthAttemptFn       func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
+	CreatePasswordResetRequestFn   func(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
+	ConsumePasswordResetRequestFn  func(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
+	UpdatePasswordHashFn           func(ctx context.Context, arg db.UpdatePasswordHashParams) error
+	CreateEmailResetRequestFn      func(ctx context.Context, arg db.CreateEmailResetRequestParams) (db.EmailResetRequest, error)
+	ConsumeEmailResetRequestFn     func(ctx context.Context, id []byte) (db.EmailResetRequest, error)
+	UpdateEmailFn                  func(ctx context.Context, arg db.UpdateEmailParams) error
 }
 
 func (q *mockQueries) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
@@ -1357,12 +1360,12 @@ func (q *mockQueries) CountFailedAuthAttemptsSince(ctx context.Context, arg db.C
 	return 0, nil
 }
 
-func (q *mockQueries) CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error) {
-	if q.CountAuthAttemptsForPassResetReqFn != nil {
-		return q.CountAuthAttemptsForPassResetReqFn(ctx, arg)
+func (q *mockQueries) CountTieredAuthAttempts(ctx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error) {
+	if q.CountTieredAuthAttemptsFn != nil {
+		return q.CountTieredAuthAttemptsFn(ctx, arg)
 	}
 
-	return db.CountAuthAttemptsForPassResetReqRow{}, nil
+	return db.CountTieredAuthAttemptsRow{}, nil
 }
 
 func (q *mockQueries) CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
@@ -1392,6 +1395,30 @@ func (q *mockQueries) ConsumePasswordResetRequest(ctx context.Context, id []byte
 func (q *mockQueries) UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error {
 	if q.UpdatePasswordHashFn != nil {
 		return q.UpdatePasswordHashFn(ctx, arg)
+	}
+
+	return nil
+}
+
+func (q *mockQueries) CreateEmailResetRequest(ctx context.Context, arg db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+	if q.CreateEmailResetRequestFn != nil {
+		return q.CreateEmailResetRequestFn(ctx, arg)
+	}
+
+	return db.EmailResetRequest{ID: arg.ID, UserID: arg.UserID, NewEmail: arg.NewEmail}, nil
+}
+
+func (q *mockQueries) ConsumeEmailResetRequest(ctx context.Context, id []byte) (db.EmailResetRequest, error) {
+	if q.ConsumeEmailResetRequestFn != nil {
+		return q.ConsumeEmailResetRequestFn(ctx, id)
+	}
+
+	return db.EmailResetRequest{}, pgx.ErrNoRows
+}
+
+func (q *mockQueries) UpdateEmail(ctx context.Context, arg db.UpdateEmailParams) error {
+	if q.UpdateEmailFn != nil {
+		return q.UpdateEmailFn(ctx, arg)
 	}
 
 	return nil
