@@ -52,7 +52,7 @@ func TestNormalizeAndValidateEmail(t *testing.T) {
 	t.Run("rejects invalid emails", testNormalizeAndValidateEmailInvalidInputs)
 }
 
-func TestPasswordRest(t *testing.T) {
+func TestPasswordReset(t *testing.T) {
 	t.Run("can reset password when authenticated", testResetPasswordForAuthenticatedUser)
 	t.Run("password reset fails with authenticated user if existing password incorrect", testResetPasswordForAuthenticatedUserWrongCurrentPassword)
 	t.Run("authenticated password reset doesn't allow weak pass", testResetPasswordForAuthenticatedUserRejectsWeakPassword)
@@ -64,6 +64,15 @@ func TestPasswordRest(t *testing.T) {
 	t.Run("can reset password with token", testCanResetPasswordWithToken)
 	t.Run("cant reset password with incorrect token", testCantResetPasswordWithIncorrectToken)
 	t.Run("cant reset password with expired token", testCantResetPasswordWithExpiredToken)
+}
+
+func TestCreateEmailResetRequest(t *testing.T) {
+	t.Run("can request email reset when authenticated", testCanRequestEmailReset)
+	t.Run("email reset request fails with incorrect current password", testCreateEmailResetRequestFailsWithIncorrectPassword)
+	t.Run("email reset request fails with malformed new email", testCantRequestEmailResetWithMalformedNewEmail)
+	t.Run("email reset request fails when new email matches current email", testCantRequestEmailResetWithSameEmail)
+	t.Run("email reset request fails when new email already in use", testCantRequestEmailResetWithEmailAlreadyInUse)
+	t.Run("email reset request propagates unexpected error checking new email", testCreateEmailResetRequestPropagatesUnexpectedGetUserByEmailError)
 }
 
 func testUserSignUp(t *testing.T) {
@@ -299,15 +308,11 @@ func testUserLogIn(t *testing.T) {
 	password := "password"
 	authAttemptCreated := false
 
-	argon := argon2.MemoryConstrainedDefaults()
-	passwordHash, err := argon.HashEncoded([]byte(password))
-	if err != nil {
-		t.Fatalf("failed to hash initial password: %v", err)
-	}
+	passwordHash := hashPassword(t, password)
 
 	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
-			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
+			return db.User{ID: id, Email: email, PasswordHash: passwordHash, IsActive: true}, nil
 		},
 		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
 			authAttemptCreated = true
@@ -340,7 +345,7 @@ func testUserLogIn(t *testing.T) {
 		t.Fatalf("got email %v, expected %v", user.DBUser().Email, email)
 	}
 
-	if user.DBUser().PasswordHash != string(passwordHash) {
+	if user.DBUser().PasswordHash != passwordHash {
 		t.Fatalf("got password hash %v, expected %v", user.DBUser().PasswordHash, passwordHash)
 	}
 
@@ -390,15 +395,11 @@ func testUserLogInWrongPassword(t *testing.T) {
 	ctx := context.Background()
 	authAttemptCreated := false
 
-	argon := argon2.MemoryConstrainedDefaults()
-	passwordHash, err := argon.HashEncoded([]byte("correct-password"))
-	if err != nil {
-		t.Fatalf("failed to hash initial password: %v", err)
-	}
+	passwordHash := hashPassword(t, "correct-password")
 
 	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
-			return db.User{ID: 1, Email: email, PasswordHash: string(passwordHash), IsActive: true}, nil
+			return db.User{ID: 1, Email: email, PasswordHash: passwordHash, IsActive: true}, nil
 		},
 		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
 			authAttemptCreated = true
@@ -409,7 +410,7 @@ func testUserLogInWrongPassword(t *testing.T) {
 		},
 	})
 
-	_, err = userService.LogIn(ctx, AuthenticateBody{
+	_, err := userService.LogIn(ctx, AuthenticateBody{
 		Email:    "test@example.com",
 		Password: "wrong-password",
 	})
@@ -505,15 +506,11 @@ func testLogInWhenUserInactive(t *testing.T) {
 	password := "password"
 	authAttemptCreated := false
 
-	argon := argon2.MemoryConstrainedDefaults()
-	passwordHash, err := argon.HashEncoded([]byte(password))
-	if err != nil {
-		t.Fatalf("failed to hash initial password: %v", err)
-	}
+	passwordHash := hashPassword(t, password)
 
 	userService := setupUserService(t, mockQueries{
 		GetUserByEmailFn: func(ctx context.Context, email string) (db.User, error) {
-			return db.User{ID: id, Email: email, PasswordHash: string(passwordHash), IsActive: false}, nil
+			return db.User{ID: id, Email: email, PasswordHash: passwordHash, IsActive: false}, nil
 		},
 		CreateLoginAuthAttemptFn: func(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error {
 			authAttemptCreated = true
@@ -665,15 +662,9 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 	currentPassword := "correct-current-password"
 	newPassword := "brand-new-password"
 
-	argon := argon2.MemoryConstrainedDefaults()
-	currentPasswordHash, err := argon.HashEncoded([]byte(currentPassword))
-	if err != nil {
-		t.Fatalf("HashEncoded returned error: %v", err)
-	}
-
 	usr := UserFromDB(db.User{
 		ID:           42,
-		PasswordHash: string(currentPasswordHash),
+		PasswordHash: hashPassword(t, currentPassword),
 	})
 
 	updated := false
@@ -695,7 +686,7 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 		},
 	})
 
-	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
+	err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
 		Password:    currentPassword,
 		NewPassword: newPassword,
 	})
@@ -730,15 +721,9 @@ func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
 	providedCurrentPassword := "wrong-current-password"
 	newPassword := "brand-new-password"
 
-	argon := argon2.MemoryConstrainedDefaults()
-	currentPasswordHash, err := argon.HashEncoded([]byte(actualCurrentPassword))
-	if err != nil {
-		t.Fatalf("HashEncoded returned error: %v", err)
-	}
-
 	usr := UserFromDB(db.User{
 		ID:           84,
-		PasswordHash: string(currentPasswordHash),
+		PasswordHash: hashPassword(t, actualCurrentPassword),
 	})
 
 	userService := setupUserService(t, mockQueries{
@@ -748,7 +733,7 @@ func testResetPasswordForAuthenticatedUserWrongCurrentPassword(t *testing.T) {
 		},
 	})
 
-	err = userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
+	err := userService.ResetPasswordForAuthenticatedUser(ctx, usr, AuthenticatedPasswordResetBody{
 		Password:    providedCurrentPassword,
 		NewPassword: newPassword,
 	})
@@ -761,15 +746,9 @@ func testResetPasswordForAuthenticatedUserRejectsWeakPassword(t *testing.T) {
 	ctx := context.Background()
 	currentPassword := "correct-current-password"
 
-	argon := argon2.MemoryConstrainedDefaults()
-	currentPasswordHash, err := argon.HashEncoded([]byte(currentPassword))
-	if err != nil {
-		t.Fatalf("HashEncoded returned error: %v", err)
-	}
-
 	usr := UserFromDB(db.User{
 		ID:           128,
-		PasswordHash: string(currentPasswordHash),
+		PasswordHash: hashPassword(t, currentPassword),
 	})
 
 	testCases := []struct {
@@ -1253,6 +1232,335 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 	}
 }
 
+func testCanRequestEmailReset(t *testing.T) {
+	ctx := context.Background()
+	currentPassword := "correct-current-password"
+	currentEmail := "current@example.com"
+	inputNewEmail := " New@Example.COM "
+	normalizedNewEmail := "New@example.com"
+	userID := int64(42)
+
+	usr := UserFromDB(db.User{
+		ID:           userID,
+		Email:        currentEmail,
+		PasswordHash: hashPassword(t, currentPassword),
+	})
+
+	gotExistingUserCheck := false
+	resetRequested := false
+	newEmailMailed := false
+	oldEmailNotified := false
+	authAttemptCreated := false
+
+	emailResetURL := "http://example.com/email-reset"
+	userService := setupUserServiceWithEmailReset(t, mockQueries{
+		GetUserByEmailFn: func(callCtx context.Context, email string) (db.User, error) {
+			if callCtx != ctx {
+				t.Fatal("GetUserByEmail called with unexpected context")
+			}
+			if email != normalizedNewEmail {
+				t.Fatalf("GetUserByEmail got email %q, want %q", email, normalizedNewEmail)
+			}
+			gotExistingUserCheck = true
+			return db.User{}, pgx.ErrNoRows
+		},
+		CreateEmailResetRequestFn: func(callCtx context.Context, arg db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+			if callCtx != ctx {
+				t.Fatal("CreateEmailResetRequest called with unexpected context")
+			}
+			if arg.UserID != userID {
+				t.Fatalf("CreateEmailResetRequest got userID %v, want %v", arg.UserID, userID)
+			}
+			if arg.NewEmail != normalizedNewEmail {
+				t.Fatalf("CreateEmailResetRequest got newEmail %q, want %q", arg.NewEmail, normalizedNewEmail)
+			}
+			if len(arg.ID) == 0 {
+				t.Fatal("CreateEmailResetRequest got empty token id")
+			}
+			resetRequested = true
+			return db.EmailResetRequest{ID: arg.ID, UserID: arg.UserID, NewEmail: arg.NewEmail}, nil
+		},
+		CreateLoginAuthAttemptFn: func(callCtx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			if callCtx != ctx {
+				t.Fatal("CreateLoginAuthAttempt called with unexpected context")
+			}
+			if arg.Action != db.AuthActionEmailReset {
+				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionEmailReset)
+			}
+			if arg.Email != currentEmail {
+				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, currentEmail)
+			}
+			if arg.Outcome != db.AuthOutcomeSucceeded {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeSucceeded)
+			}
+			authAttemptCreated = true
+			return nil
+		},
+	}, email.MockEmailService{
+		SendMailFn: func(toEmail string, subject string, body string) error {
+			switch toEmail {
+			case normalizedNewEmail:
+				prefix := "http://example.com/email-reset/?token="
+				if subject != "Email Reset" {
+					t.Fatalf("SendMail to new email got subject %q, want %q", subject, "Email Reset")
+				}
+				if !strings.HasPrefix(body, prefix) {
+					t.Fatalf("SendMail to new email got body %q, want prefix %q", body, prefix)
+				}
+				if len(body) <= len(prefix) {
+					t.Fatalf("SendMail to new email got body %q, want token appended", body)
+				}
+				newEmailMailed = true
+			case currentEmail:
+				if subject != "Email Change Requested" {
+					t.Fatalf("SendMail to old email got subject %q, want %q", subject, "Email Change Requested")
+				}
+				oldEmailNotified = true
+			default:
+				t.Fatalf("SendMail called with unexpected recipient %q", toEmail)
+			}
+			return nil
+		},
+	}, emailResetURL)
+
+	err := userService.CreateEmailResetRequest(ctx, usr, CreateEmailResetRequestBody{
+		Password: currentPassword,
+		NewEmail: inputNewEmail,
+	})
+	if err != nil {
+		t.Fatalf("CreateEmailResetRequest returned error: %v", err)
+	}
+
+	if !gotExistingUserCheck {
+		t.Fatal("GetUserByEmail was not called")
+	}
+	if !resetRequested {
+		t.Fatal("CreateEmailResetRequest was not called")
+	}
+	if !newEmailMailed {
+		t.Fatal("SendMail to new email was not called")
+	}
+	if !oldEmailNotified {
+		t.Fatal("SendMail to old email was not called")
+	}
+	if !authAttemptCreated {
+		t.Fatal("CreateLoginAuthAttempt was not called")
+	}
+}
+
+func testCreateEmailResetRequestFailsWithIncorrectPassword(t *testing.T) {
+	ctx := context.Background()
+
+	// Arrange
+	actualPassword := "correct-current-password"
+	providedPassword := "wrong-current-password"
+	currentEmail := "current@example.com"
+
+	usr := UserFromDB(db.User{
+		ID:           42,
+		Email:        currentEmail,
+		PasswordHash: hashPassword(t, actualPassword),
+	})
+
+	authAttemptCreated := false
+
+	userService := setupUserServiceWithEmail(t, mockQueries{
+		CreateEmailResetRequestFn: func(context.Context, db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+			t.Fatal("CreateEmailResetRequest should not be called when password is incorrect")
+			return db.EmailResetRequest{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(callCtx context.Context, arg db.CreateLoginAuthAttemptParams) error {
+			if callCtx != ctx {
+				t.Fatal("CreateLoginAuthAttempt called with unexpected context")
+			}
+			if arg.Action != db.AuthActionEmailReset {
+				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionEmailReset)
+			}
+			if arg.Email != currentEmail {
+				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, currentEmail)
+			}
+			if arg.Outcome != db.AuthOutcomeFailed {
+				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeFailed)
+			}
+			authAttemptCreated = true
+			return nil
+		},
+	}, email.MockEmailService{
+		SendMailFn: func(toEmail string, subject string, body string) error {
+			t.Fatal("SendMail should not be called when password is incorrect")
+			return nil
+		},
+	}, "")
+
+	err := userService.CreateEmailResetRequest(ctx, usr, CreateEmailResetRequestBody{
+		Password: providedPassword,
+		NewEmail: "new@example.com",
+	})
+
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("got error %v, want %v", err, ErrInvalidCredentials)
+	}
+	if !authAttemptCreated {
+		t.Fatal("CreateLoginAuthAttempt was not called")
+	}
+}
+
+func testCantRequestEmailResetWithMalformedNewEmail(t *testing.T) {
+	ctx := context.Background()
+
+	usr := UserFromDB(db.User{
+		ID:           42,
+		Email:        "current@example.com",
+		PasswordHash: hashPassword(t, "correct-current-password"),
+	})
+
+	userService := setupUserServiceWithEmail(t, mockQueries{
+		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
+			t.Fatal("GetUserByEmail should not be called for malformed new email")
+			return db.User{}, nil
+		},
+		CreateEmailResetRequestFn: func(context.Context, db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+			t.Fatal("CreateEmailResetRequest should not be called for malformed new email")
+			return db.EmailResetRequest{}, nil
+		},
+		CreateLoginAuthAttemptFn: func(context.Context, db.CreateLoginAuthAttemptParams) error {
+			t.Fatal("CreateLoginAuthAttempt should not be called for malformed new email")
+			return nil
+		},
+	}, email.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called for malformed new email")
+			return nil
+		},
+	}, "")
+
+	err := userService.CreateEmailResetRequest(ctx, usr, CreateEmailResetRequestBody{
+		Password: "correct-current-password",
+		NewEmail: "not-an-email",
+	})
+	if !errors.Is(err, ErrInvalidEmail) {
+		t.Fatalf("got error %v, want %v", err, ErrInvalidEmail)
+	}
+}
+
+func testCantRequestEmailResetWithSameEmail(t *testing.T) {
+	ctx := context.Background()
+	currentEmail := "current@example.com"
+
+	usr := UserFromDB(db.User{
+		ID:           42,
+		Email:        currentEmail,
+		PasswordHash: hashPassword(t, "correct-current-password"),
+	})
+
+	userService := setupUserServiceWithEmail(t, mockQueries{
+		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
+			t.Fatal("GetUserByEmail should not be called when new email matches current email")
+			return db.User{}, nil
+		},
+		CreateEmailResetRequestFn: func(context.Context, db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+			t.Fatal("CreateEmailResetRequest should not be called when new email matches current email")
+			return db.EmailResetRequest{}, nil
+		},
+	}, email.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called when new email matches current email")
+			return nil
+		},
+	}, "")
+
+	err := userService.CreateEmailResetRequest(ctx, usr, CreateEmailResetRequestBody{
+		Password: "correct-current-password",
+		NewEmail: " " + currentEmail + " ",
+	})
+	if !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("got error %v, want %v", err, ErrEmailTaken)
+	}
+}
+
+func testCantRequestEmailResetWithEmailAlreadyInUse(t *testing.T) {
+	ctx := context.Background()
+	currentEmail := "current@example.com"
+	newEmail := "new@example.com"
+
+	usr := UserFromDB(db.User{
+		ID:           42,
+		Email:        currentEmail,
+		PasswordHash: hashPassword(t, "correct-current-password"),
+	})
+
+	gotExistingUserCheck := false
+
+	userService := setupUserServiceWithEmail(t, mockQueries{
+		GetUserByEmailFn: func(callCtx context.Context, email string) (db.User, error) {
+			if callCtx != ctx {
+				t.Fatal("GetUserByEmail called with unexpected context")
+			}
+			if email != newEmail {
+				t.Fatalf("GetUserByEmail got email %q, want %q", email, newEmail)
+			}
+			gotExistingUserCheck = true
+			return db.User{ID: 99, Email: newEmail}, nil
+		},
+		CreateEmailResetRequestFn: func(context.Context, db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+			t.Fatal("CreateEmailResetRequest should not be called when new email is already in use")
+			return db.EmailResetRequest{}, nil
+		},
+	}, email.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called when new email is already in use")
+			return nil
+		},
+	}, "")
+
+	err := userService.CreateEmailResetRequest(ctx, usr, CreateEmailResetRequestBody{
+		Password: "correct-current-password",
+		NewEmail: newEmail,
+	})
+	if !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("got error %v, want %v", err, ErrEmailTaken)
+	}
+	if !gotExistingUserCheck {
+		t.Fatal("GetUserByEmail was not called")
+	}
+}
+
+func testCreateEmailResetRequestPropagatesUnexpectedGetUserByEmailError(t *testing.T) {
+	ctx := context.Background()
+	currentEmail := "current@example.com"
+	newEmail := "new@example.com"
+	wantErr := errors.New("database unavailable")
+
+	usr := UserFromDB(db.User{
+		ID:           42,
+		Email:        currentEmail,
+		PasswordHash: hashPassword(t, "correct-current-password"),
+	})
+
+	userService := setupUserServiceWithEmail(t, mockQueries{
+		GetUserByEmailFn: func(context.Context, string) (db.User, error) {
+			return db.User{}, wantErr
+		},
+		CreateEmailResetRequestFn: func(context.Context, db.CreateEmailResetRequestParams) (db.EmailResetRequest, error) {
+			t.Fatal("CreateEmailResetRequest should not be called when checking new email fails")
+			return db.EmailResetRequest{}, nil
+		},
+	}, email.MockEmailService{
+		SendMailFn: func(string, string, string) error {
+			t.Fatal("SendMail should not be called when checking new email fails")
+			return nil
+		},
+	}, "")
+
+	err := userService.CreateEmailResetRequest(ctx, usr, CreateEmailResetRequestBody{
+		Password: "correct-current-password",
+		NewEmail: newEmail,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("got error %v, want %v", err, wantErr)
+	}
+}
+
 func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 	testCases := []string{
 		"",
@@ -1285,6 +1593,16 @@ func testNormalizeAndValidateEmailInvalidInputs(t *testing.T) {
 	}
 }
 
+func hashPassword(t *testing.T, password string) string {
+	t.Helper()
+	argon := argon2.MemoryConstrainedDefaults()
+	hash, err := argon.HashEncoded([]byte(password))
+	if err != nil {
+		t.Fatalf("HashEncoded returned error: %v", err)
+	}
+	return string(hash)
+}
+
 func setupUserService(t *testing.T, mockedQueries mockQueries) *Service {
 	t.Helper()
 	return setupUserServiceWithEmail(t, mockedQueries, email.MockEmailService{}, "")
@@ -1300,8 +1618,14 @@ func setupUserServiceWithEmail(t *testing.T, mockedQueries mockQueries, mockedEm
 	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{PasswordResetURL: passwordResetURL})
 }
 
-func needsImplemented(t *testing.T) {
-	t.Skip()
+func setupUserServiceWithEmailReset(t *testing.T, mockedQueries mockQueries, mockedEmailService email.MockEmailService, emailResetURL string) *Service {
+	t.Helper()
+	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
+		return fn(&mockedQueries)
+	}
+	mockedSessionService := session.MockService{}
+
+	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{EmailResetURL: emailResetURL})
 }
 
 type mockQueries struct {
