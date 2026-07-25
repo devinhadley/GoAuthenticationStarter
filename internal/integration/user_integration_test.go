@@ -96,7 +96,8 @@ func TestEmailResetIntegration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
-	t.Run("email reset succeeds end to end and deactivates sessions", testEmailResetSucceeds)
+	t.Run("email reset request succeeds and sends emails", testEmailResetRequestSucceeds)
+	t.Run("email reset confirm succeeds and deactivates sessions", testEmailResetConfirmSucceeds)
 	t.Run("email reset request fails with incorrect password and doesnt deactivate sessions", testEmailResetRequestFailsWithWrongPassword)
 	t.Run("email reset request fails when new email already in use", testEmailResetRequestFailsWhenNewEmailAlreadyInUse)
 	t.Run("email reset request fails without authenticated user", testEmailResetRequestFailsWithoutAuthenticatedUser)
@@ -1164,12 +1165,12 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 	}
 }
 
-func testEmailResetSucceeds(t *testing.T) {
+func testEmailResetRequestSucceeds(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 	ctx := context.Background()
 
-	currentEmail := "email-reset-success@example.com"
-	newEmail := "email-reset-success-new@example.com"
+	currentEmail := "email-reset-request-success@example.com"
+	newEmail := "email-reset-request-success-new@example.com"
 	currentPassword := "current-password-12345"
 
 	createdUser, sessionCookie := signUpWithSessions(t, deps, currentEmail, currentPassword, 2)
@@ -1213,6 +1214,39 @@ func testEmailResetSucceeds(t *testing.T) {
 	resetToken := extractTokenFromResetBody(newEmailMessage.Body)
 	if resetToken == "" {
 		t.Fatalf("failed to extract reset token from email body %q", newEmailMessage.Body)
+	}
+
+	// Email is not changed yet, only requested.
+	if _, err := deps.queries.GetUserByEmail(ctx, currentEmail); err != nil {
+		t.Fatalf("failed to fetch user by current email after request: %v", err)
+	}
+}
+
+func testEmailResetConfirmSucceeds(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	currentEmail := "email-reset-confirm-success@example.com"
+	newEmail := "email-reset-confirm-success-new@example.com"
+	currentPassword := "current-password-12345"
+
+	createdUser, _ := signUpWithSessions(t, deps, currentEmail, currentPassword, 2)
+
+	err := deps.userService.CreateEmailResetRequest(ctx, createdUser, user.CreateEmailResetRequestBody{
+		Password: currentPassword,
+		NewEmail: newEmail,
+	})
+	if err != nil {
+		t.Fatalf("CreateEmailResetRequest returned error: %v", err)
+	}
+
+	if len(deps.emailService.Emails) != 2 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 2)
+	}
+
+	resetToken := extractTokenFromResetBody(deps.emailService.Emails[0].Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
 	}
 
 	confirmRec := performJsonRequest(deps.handler, http.MethodPut, "/email-reset?token="+resetToken, nil)
@@ -1422,17 +1456,6 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 		emailService:   sliceEmailService,
 		handler:        handler,
 	}
-}
-
-type apiErrorResponse struct {
-	Error    string `json:"error"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type getUserResponse struct {
-	ID    int64  `json:"id"`
-	Email string `json:"email"`
 }
 
 func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) apiErrorResponse {
@@ -1661,4 +1684,15 @@ func extractTokenFromResetBody(body string) string {
 	}
 
 	return token
+}
+
+type apiErrorResponse struct {
+	Error    string `json:"error"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type getUserResponse struct {
+	ID    int64  `json:"id"`
+	Email string `json:"email"`
 }

@@ -28,7 +28,6 @@ var (
 	ErrInvalidLogInInput  = errors.New("invalid log-in input")
 	ErrEmailTaken         = errors.New("email already in use")
 	ErrInvalidEmail       = errors.New("email is not valid")
-	ErrPasswordHashing    = errors.New("password hashing not implemented")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrPasswordEmpty      = errors.New("password cannot be empty")
 	ErrPasswordShort      = errors.New("password cannot be empty")

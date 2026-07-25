@@ -2,7 +2,6 @@ package handlers // handlers are responsible for http endpoints and http related
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -47,13 +46,8 @@ type tokenEmailResetter interface {
 
 func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody user.AuthenticateBody
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&reqBody)
-		if err != nil {
-			web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		reqBody, ok := web.DecodeJSONBodyOrWriteError[user.AuthenticateBody](w, r)
+		if !ok {
 			return
 		}
 
@@ -83,13 +77,8 @@ func CreateSignUpHandler(userService signUpper, sessionService sessionCreator) h
 
 func CreateLoginHandler(userService logInner, sessionService sessionCreator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody user.AuthenticateBody
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&reqBody)
-		if err != nil {
-			web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		reqBody, ok := web.DecodeJSONBodyOrWriteError[user.AuthenticateBody](w, r)
+		if !ok {
 			return
 		}
 
@@ -136,13 +125,8 @@ func CreateGetUserHandler() http.Handler {
 func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordResetter) http.Handler {
 	return middleware.Requires(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var reqBody user.AuthenticatedPasswordResetBody
-
-			decoder := json.NewDecoder(r.Body)
-			decoder.DisallowUnknownFields()
-			err := decoder.Decode(&reqBody)
-			if err != nil {
-				web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			reqBody, ok := web.DecodeJSONBodyOrWriteError[user.AuthenticatedPasswordResetBody](w, r)
+			if !ok {
 				return
 			}
 
@@ -169,17 +153,12 @@ func CreateAuthenticatedPasswordResetHandler(userService authenticatedPasswordRe
 
 func CreatePasswordResetRequestHandler(userService passwordResetRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var reqBody user.CreatePasswordResetRequestBody
-
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		err := decoder.Decode(&reqBody)
-		if err != nil {
-			web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		reqBody, ok := web.DecodeJSONBodyOrWriteError[user.CreatePasswordResetRequestBody](w, r)
+		if !ok {
 			return
 		}
 
-		err = userService.CreatePasswordResetRequest(r.Context(), reqBody)
+		err := userService.CreatePasswordResetRequest(r.Context(), reqBody)
 		if err != nil {
 			if writeCreatePasswordResetRequestError(w, err) {
 				return
@@ -197,17 +176,12 @@ func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 
-		var reqBody user.ResetPasswordFromResetRequestBody
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		err := decoder.Decode(&reqBody)
-		if err != nil {
-			web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+		reqBody, ok := web.DecodeJSONBodyOrWriteError[user.ResetPasswordFromResetRequestBody](w, r)
+		if !ok {
 			return
 		}
 
-		err = userService.ResetPasswordFromResetRequest(r.Context(), token, reqBody)
+		err := userService.ResetPasswordFromResetRequest(r.Context(), token, reqBody)
 		if err != nil {
 			if writeTokenPasswordResetError(w, err) {
 				return
@@ -224,13 +198,8 @@ func CreateTokenPasswordResetHandler(userService tokenPasswordResetter) http.Han
 func CreateEmailResetRequestHandler(userService emailResetRequester) http.Handler {
 	return middleware.Requires(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var reqBody user.CreateEmailResetRequestBody
-
-			decoder := json.NewDecoder(r.Body)
-			decoder.DisallowUnknownFields()
-			err := decoder.Decode(&reqBody)
-			if err != nil {
-				web.WriteJSONResponse(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+			reqBody, ok := web.DecodeJSONBodyOrWriteError[user.CreateEmailResetRequestBody](w, r)
+			if !ok {
 				return
 			}
 

@@ -17,17 +17,6 @@ var (
 	integrationTestPool *pgxpool.Pool
 )
 
-func getIntegrationTestDSN(t testing.TB) string {
-	t.Helper()
-
-	if integrationTestDSN != "" {
-		return integrationTestDSN
-	}
-
-	t.Fatal("integration test dsn is empty; expected TestMain to initialize container connection string")
-	return ""
-}
-
 func getIntegrationTestPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 
