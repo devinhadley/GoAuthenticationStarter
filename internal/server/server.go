@@ -15,11 +15,11 @@ func NewMux(userService *user.Service, sessionService *session.Service) http.Han
 	mux.Handle("GET /user", handlers.CreateGetUserHandler())
 	mux.Handle("POST /user/signup", handlers.CreateSignUpHandler(userService, sessionService))
 	mux.Handle("POST /user/login", handlers.CreateLoginHandler(userService, sessionService))
-	mux.Handle("PUT /user/password", handlers.CreateAuthenticatedPasswordResetHandler(userService))
+	mux.Handle("PUT /user/password", handlers.CreateAuthenticatedPasswordResetHandler(userService, sessionService))
 	mux.Handle("POST /password-reset", handlers.CreatePasswordResetRequestHandler(userService))
-	mux.Handle("PUT /password-reset", handlers.CreateTokenPasswordResetHandler(userService))
+	mux.Handle("PUT /password-reset", handlers.CreateTokenPasswordResetHandler(userService, sessionService))
 	mux.Handle("POST /email-reset", handlers.CreateEmailResetRequestHandler(userService))
-	mux.Handle("PUT /email-reset", handlers.CreateTokenEmailResetHandler(userService))
+	mux.Handle("PUT /email-reset", handlers.CreateTokenEmailResetHandler(userService, sessionService))
 
 	return middleware.CreateSessionMiddleware(userService, sessionService, mux)
 }

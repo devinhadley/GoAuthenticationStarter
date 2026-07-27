@@ -11,7 +11,6 @@ import (
 
 	"devinhadley/gobootstrapweb/internal/db"
 	"devinhadley/gobootstrapweb/internal/service/email"
-	"devinhadley/gobootstrapweb/internal/service/session"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1127,7 +1126,7 @@ func testCanResetPasswordWithToken(t *testing.T) {
 		},
 	})
 
-	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
+	_, err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
 		NewPassword: newPassword,
 	})
 	if err != nil {
@@ -1175,7 +1174,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		},
 	})
 
-	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
+	_, err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
 		NewPassword: "brand-new-password",
 	})
 	if !errors.Is(err, ErrInvalidResetToken) {
@@ -1220,7 +1219,7 @@ func testCantResetPasswordWithExpiredToken(t *testing.T) {
 		},
 	})
 
-	err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
+	_, err := userService.ResetPasswordFromResetRequest(ctx, encodedToken, ResetPasswordFromResetRequestBody{
 		NewPassword: "brand-new-password",
 	})
 	if !errors.Is(err, ErrInvalidResetToken) {
@@ -1613,9 +1612,7 @@ func setupUserServiceWithEmail(t *testing.T, mockedQueries mockQueries, mockedEm
 	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
 		return fn(&mockedQueries)
 	}
-	mockedSessionService := session.MockService{}
-
-	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{PasswordResetURL: passwordResetURL})
+	return NewService(&mockedQueries, runWithTx, mockedEmailService, Config{PasswordResetURL: passwordResetURL})
 }
 
 func setupUserServiceWithEmailReset(t *testing.T, mockedQueries mockQueries, mockedEmailService email.MockEmailService, emailResetURL string) *Service {
@@ -1623,9 +1620,7 @@ func setupUserServiceWithEmailReset(t *testing.T, mockedQueries mockQueries, moc
 	runWithTx := func(ctx context.Context, fn func(q UserQueries) error) error {
 		return fn(&mockedQueries)
 	}
-	mockedSessionService := session.MockService{}
-
-	return NewService(&mockedQueries, runWithTx, mockedEmailService, mockedSessionService, Config{EmailResetURL: emailResetURL})
+	return NewService(&mockedQueries, runWithTx, mockedEmailService, Config{EmailResetURL: emailResetURL})
 }
 
 type mockQueries struct {

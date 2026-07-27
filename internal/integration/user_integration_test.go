@@ -1132,7 +1132,7 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
 	}
 
-	err = deps.userService.ResetPasswordFromResetRequest(ctx, resetToken, user.ResetPasswordFromResetRequestBody{
+	_, err = deps.userService.ResetPasswordFromResetRequest(ctx, resetToken, user.ResetPasswordFromResetRequestBody{
 		NewPassword: firstNewPassword,
 	})
 	if err != nil {
@@ -1441,7 +1441,7 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	sliceEmailService := &email.SliceEmailService{}
 	txnGenerator := user.CreateUserServiceTxnGenerator(pool, queries)
 	sessionService := session.NewService(queries)
-	userService := user.NewService(queries, txnGenerator, sliceEmailService, sessionService, user.Config{
+	userService := user.NewService(queries, txnGenerator, sliceEmailService, user.Config{
 		PasswordResetURL: "http://example.com/password-reset",
 		EmailResetURL:    "http://example.com/email-reset",
 	})

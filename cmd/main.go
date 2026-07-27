@@ -52,7 +52,7 @@ func main() {
 	txnGenerator := user.CreateUserServiceTxnGenerator(dbConPool, queries)
 
 	sessionService := session.NewService(queries)
-	userService := user.NewService(queries, txnGenerator, mailService, sessionService, user.Config{
+	userService := user.NewService(queries, txnGenerator, mailService, user.Config{
 		PasswordResetURL: passwordResetURL,
 		EmailResetURL:    emailResetURL,
 	})

@@ -64,17 +64,12 @@ type UserQueries interface {
 	UpdateEmail(ctx context.Context, arg db.UpdateEmailParams) error
 }
 
-type sessionDeactivator interface {
-	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
-}
-
 type Service struct {
 	queries         UserQueries
 	runWithTx       RunUserQueriesInTxFn
 	commonPasswords commonPasswords
 	config          Config
 	emailService    email.Service
-	sessionService  sessionDeactivator
 }
 
 type AuthenticateBody struct {
@@ -105,7 +100,7 @@ type Config struct {
 	EmailResetURL    string
 }
 
-func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, sessionService sessionDeactivator, config Config) *Service {
+func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, config Config) *Service {
 	if len(config.PasswordResetURL) > 0 && !strings.HasSuffix(config.PasswordResetURL, "/") {
 		config.PasswordResetURL += "/"
 	}
@@ -113,7 +108,7 @@ func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailServic
 		config.EmailResetURL += "/"
 	}
 
-	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, sessionService: sessionService, commonPasswords: getCommonPasswords(), config: config}
+	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, commonPasswords: getCommonPasswords(), config: config}
 }
 
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -248,15 +243,6 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 		return fmt.Errorf("updating password hash during authenticated password reset: %w", err)
 	}
 
-	// NOTE:
-	// If for any reason we fail to deactivate sessions, we should still let the password reset go through.
-	// This is still bad though and deactivation should be retried at some point.
-	err = s.sessionService.DeactivateAllSessionsForUser(ctx, usr.DBUser().ID)
-	if err != nil {
-		log.Printf("deactivating all sessions during authenticated password reset: %v", err)
-		return nil
-	}
-
 	return nil
 }
 
@@ -318,15 +304,15 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 	return nil
 }
 
-func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token string, input ResetPasswordFromResetRequestBody) error {
+func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token string, input ResetPasswordFromResetRequestBody) (int64, error) {
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	resetToken, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
-		return ErrInvalidResetToken
+		return 0, ErrInvalidResetToken
 	}
 
 	sum := sha256.Sum256(resetToken)
@@ -367,15 +353,10 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 		return nil
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	err = s.sessionService.DeactivateAllSessionsForUser(ctx, userID)
-	if err != nil {
-		log.Printf("deactivating all sessions during reset from token: %v", err)
-	}
-
-	return nil
+	return userID, nil
 }
 
 func (s *Service) CreateEmailResetRequest(ctx context.Context, usr User, input CreateEmailResetRequestBody) error {
@@ -447,10 +428,10 @@ func (s *Service) CreateEmailResetRequest(ctx context.Context, usr User, input C
 	return nil
 }
 
-func (s *Service) ResetEmailFromResetRequest(ctx context.Context, token string) error {
+func (s *Service) ResetEmailFromResetRequest(ctx context.Context, token string) (int64, error) {
 	resetToken, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
-		return ErrInvalidResetToken
+		return 0, ErrInvalidResetToken
 	}
 
 	sum := sha256.Sum256(resetToken)
@@ -491,15 +472,10 @@ func (s *Service) ResetEmailFromResetRequest(ctx context.Context, token string) 
 		return nil
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	err = s.sessionService.DeactivateAllSessionsForUser(ctx, userID)
-	if err != nil {
-		log.Printf("deactivating all sessions during email reset from token: %v", err)
-	}
-
-	return nil
+	return userID, nil
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {
