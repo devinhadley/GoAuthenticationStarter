@@ -2,14 +2,13 @@ package handlers // handlers are responsible for http endpoints and http related
 
 import (
 	"context"
-	"errors"
-	"log"
-	"net/http"
-
 	"devinhadley/gobootstrapweb/internal/middleware"
 	"devinhadley/gobootstrapweb/internal/service/session"
 	"devinhadley/gobootstrapweb/internal/service/user"
 	"devinhadley/gobootstrapweb/internal/web"
+	"errors"
+	"log"
+	"net/http"
 )
 
 type sessionCreator interface {
@@ -363,6 +362,11 @@ func writeCreateEmailResetRequestError(w http.ResponseWriter, err error) bool {
 
 	if errors.Is(err, user.ErrInvalidCredentials) {
 		web.WriteJSONResponse(w, http.StatusUnauthorized, map[string]any{"error": "authentication failed"})
+		return true
+	}
+
+	if errors.Is(err, user.ErrRateLimit) {
+		web.WriteJSONResponse(w, http.StatusTooManyRequests, map[string]any{"error": "try again later"})
 		return true
 	}
 
