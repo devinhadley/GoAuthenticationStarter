@@ -96,6 +96,8 @@ func TestEmailResetIntegration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
+	// TODO: Test rate limit # of requests...
+
 	t.Run("email reset request succeeds and sends emails", testEmailResetRequestSucceeds)
 	t.Run("email reset confirm succeeds and deactivates sessions", testEmailResetConfirmSucceeds)
 	t.Run("email reset request fails with incorrect password and doesnt deactivate sessions", testEmailResetRequestFailsWithWrongPassword)

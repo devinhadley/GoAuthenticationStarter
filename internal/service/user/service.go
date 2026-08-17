@@ -5,6 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/pgerr"
+	"devinhadley/gobootstrapweb/internal/service/email"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -14,11 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/service/email"
-
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/matthewhartstonge/argon2"
 )
@@ -39,14 +38,21 @@ var (
 )
 
 const (
-	rateLimitLoginDurationMinutes       = 10
-	rateLimitLoginAttemptsAllowed       = 10
-	rateLimitTieredShortDurationMinutes = 15
-	rateLimitTieredLongDurationMinutes  = 120
-	rateLimitTieredShortAllowed         = 2
-	rateLimitTieredLongAllowed          = 3
-	passwordResetTokenDurationMinutes   = 15
-	emailResetTokenDurationMinutes      = 15
+	rateLimitLoginDurationMinutes = 10
+	rateLimitLoginAttemptsAllowed = 10
+
+	passwordResetTokenDurationMinutes = 15
+	emailResetTokenDurationMinutes    = 15
+
+	passwordResetRateLimitShortWindowMinutes = 15
+	passwordResetRateLimitLongWindowMinutes  = 120
+	passwordResetRateLimitShortAllowed       = 2
+	passwordResetRateLimitLongAllowed        = 3
+
+	emailResetRateLimitShortWindowMinutes = 15
+	emailResetRateLimitLongWindowMinutes  = 120
+	emailResetRateLimitShortAllowed       = 2
+	emailResetRateLimitLongAllowed        = 3
 )
 
 type UserQueries interface {
@@ -137,11 +143,8 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, err
 		PasswordHash: string(passwordHash),
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			if pgErr.ConstraintName == "users_email_key" {
-				return User{}, ErrEmailTaken
-			}
+		if pgerr.IsUniqueViolation(err, "users_email_key") {
+			return User{}, ErrEmailTaken
 		}
 
 		return User{}, fmt.Errorf("creating user: %w", err)
@@ -177,33 +180,21 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	user, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
-			if err != nil {
-				return User{}, err
-			}
-			return User{}, ErrInvalidCredentials
+			return s.failLoginAttempt(ctx, email)
 		}
 		return User{}, fmt.Errorf("getting user by email: %w", err)
 	}
 
 	if !user.IsActive {
-		err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
-		if err != nil {
-			return User{}, err
-		}
-		return User{}, ErrInvalidCredentials
+		return s.failLoginAttempt(ctx, email)
 	}
 
-	ok, err = argon2.VerifyEncoded([]byte(input.Password), []byte(user.PasswordHash))
+	ok, err = verifyPassword(input.Password, user.PasswordHash)
 	if err != nil {
-		return User{}, fmt.Errorf("validating password hash: %w", err)
+		return User{}, err
 	}
 	if !ok {
-		err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
-		if err != nil {
-			return User{}, err
-		}
-		return User{}, ErrInvalidCredentials
+		return s.failLoginAttempt(ctx, email)
 	}
 
 	err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeSucceeded)
@@ -215,15 +206,15 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 }
 
 func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr User, input AuthenticatedPasswordResetBody) error {
-	// NOTE: No rate-limiting here. An authenticated session could be used to brute-force.
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
 		return err
 	}
 
-	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(usr.DBUser().PasswordHash))
+	// TODO: No rate-limiting here. An authenticated session could be used to brute-force.
+	ok, err := verifyPassword(input.Password, usr.DBUser().PasswordHash)
 	if err != nil {
-		return fmt.Errorf("validating password hash: %w", err)
+		return err
 	}
 
 	if !ok {
@@ -252,7 +243,7 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 		return ErrInvalidEmail
 	}
 
-	isRateLimited, err := s.isTieredRateLimited(ctx, db.AuthActionPasswordReset, email)
+	isRateLimited, err := s.isCreatePasswordResetRateLimited(ctx, email)
 	if err != nil {
 		return fmt.Errorf("checking if password reset request rate limited: %w", err)
 	}
@@ -367,11 +358,21 @@ func (s *Service) CreateEmailResetRequest(ctx context.Context, usr User, input C
 
 	currentEmail := usr.DBUser().Email
 
-	// TODO: Rate limit internal auth attempts.
-	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(usr.DBUser().PasswordHash))
+	isRateLimited, err := s.isCreateEmailResetRateLimited(ctx, currentEmail)
+	if err != nil {
+		return fmt.Errorf("checking if create email reset request rate limited: %w", err)
+	}
+
+	if isRateLimited {
+		return ErrRateLimit
+	}
+
+	// TODO: rate limit internal auth attempts.
+	ok, err = verifyPassword(input.Password, usr.DBUser().PasswordHash)
 	if err != nil {
 		return fmt.Errorf("validating password hash: %w", err)
 	}
+
 	if !ok {
 		err = s.createAuthAttempt(ctx, db.AuthActionEmailReset, currentEmail, db.AuthOutcomeFailed)
 		if err != nil {
@@ -459,8 +460,7 @@ func (s *Service) ResetEmailFromResetRequest(ctx context.Context, token string) 
 			Email: resetRequest.NewEmail,
 		})
 		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key" {
+			if pgerr.IsUniqueViolation(err, "users_email_key") {
 				return ErrEmailTaken
 			}
 
@@ -539,17 +539,25 @@ func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, e
 	return loginAttemptsForEmail >= rateLimitLoginAttemptsAllowed, nil
 }
 
-func (s *Service) isTieredRateLimited(ctx context.Context, action db.AuthAction, email string) (bool, error) {
+func (s *Service) isCreatePasswordResetRateLimited(ctx context.Context, email string) (bool, error) {
+	return s.isTieredRateLimited(ctx, db.AuthActionPasswordReset, email, passwordResetRateLimitShortWindowMinutes*time.Minute, passwordResetRateLimitLongWindowMinutes*time.Minute, passwordResetRateLimitShortAllowed, passwordResetRateLimitLongAllowed)
+}
+
+func (s *Service) isCreateEmailResetRateLimited(ctx context.Context, email string) (bool, error) {
+	return s.isTieredRateLimited(ctx, db.AuthActionEmailReset, email, emailResetRateLimitShortWindowMinutes*time.Minute, emailResetRateLimitLongWindowMinutes*time.Minute, emailResetRateLimitShortAllowed, emailResetRateLimitLongAllowed)
+}
+
+func (s *Service) isTieredRateLimited(ctx context.Context, action db.AuthAction, email string, shortWindow, longWindow time.Duration, shortAllowed, longAllowed int64) (bool, error) {
 	now := time.Now()
 
 	count, err := s.queries.CountTieredAuthAttempts(ctx, db.CountTieredAuthAttemptsParams{
 		Action: action,
 		RecentDate: pgtype.Timestamptz{
-			Time:  now.Add(-(rateLimitTieredShortDurationMinutes * time.Minute)),
+			Time:  now.Add(-shortWindow),
 			Valid: true,
 		},
 		OldDate: pgtype.Timestamptz{
-			Time:  now.Add(-(rateLimitTieredLongDurationMinutes * time.Minute)),
+			Time:  now.Add(-longWindow),
 			Valid: true,
 		},
 		Email: email,
@@ -558,7 +566,7 @@ func (s *Service) isTieredRateLimited(ctx context.Context, action db.AuthAction,
 		return false, err
 	}
 
-	return count.RecentCount >= rateLimitTieredShortAllowed || count.OldCount >= rateLimitTieredLongAllowed, nil
+	return count.RecentCount >= shortAllowed || count.OldCount >= longAllowed, nil
 }
 
 func (s *Service) createAuthAttempt(ctx context.Context, action db.AuthAction, email string, outcome db.AuthOutcome) error {
@@ -572,6 +580,13 @@ func (s *Service) createAuthAttempt(ctx context.Context, action db.AuthAction, e
 	}
 
 	return nil
+}
+
+func (s *Service) failLoginAttempt(ctx context.Context, email string) (User, error) {
+	if err := s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed); err != nil {
+		return User{}, err
+	}
+	return User{}, ErrInvalidCredentials
 }
 
 func normalizeAndValidateEmail(input string) (string, bool) {
@@ -620,4 +635,13 @@ func createPasswordHash(password string) ([]byte, error) {
 	}
 
 	return passwordHash, nil
+}
+
+func verifyPassword(password string, encodedHash string) (bool, error) {
+	ok, err := argon2.VerifyEncoded([]byte(password), []byte(encodedHash))
+	if err != nil {
+		return false, fmt.Errorf("validating password hash: %w", err)
+	}
+
+	return ok, nil
 }

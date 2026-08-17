@@ -12,7 +12,12 @@ var commonPasswordsFile []byte
 
 type commonPasswords map[string]struct{}
 
-// TODO: How much memory do I use? Probably not a lot...
+func (c commonPasswords) isCommonPassword(password string) bool {
+	password = strings.ToLower(password)
+	_, ok := c[password]
+	return ok
+}
+
 func getCommonPasswords() commonPasswords {
 	weakPasswordSet := make(map[string]struct{}, 100_000)
 
@@ -30,10 +35,4 @@ func getCommonPasswords() commonPasswords {
 	}
 
 	return weakPasswordSet
-}
-
-func (c commonPasswords) isCommonPassword(password string) bool {
-	password = strings.ToLower(password)
-	_, ok := c[password]
-	return ok
 }
