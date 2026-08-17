@@ -91,6 +91,21 @@ func TestPasswordResetIntegration(t *testing.T) {
 	t.Run("cant reset password with already used token", testCantResetPasswordWithAlreadyUsedToken)
 }
 
+func TestEmailResetIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration tests in short mode")
+	}
+
+	// TODO: Test rate limit # of requests...
+
+	t.Run("email reset request succeeds and sends emails", testEmailResetRequestSucceeds)
+	t.Run("email reset confirm succeeds and deactivates sessions", testEmailResetConfirmSucceeds)
+	t.Run("email reset request fails with incorrect password and doesnt deactivate sessions", testEmailResetRequestFailsWithWrongPassword)
+	t.Run("email reset request fails when new email already in use", testEmailResetRequestFailsWhenNewEmailAlreadyInUse)
+	t.Run("email reset request fails without authenticated user", testEmailResetRequestFailsWithoutAuthenticatedUser)
+	t.Run("email reset confirm fails with invalid token", testEmailResetConfirmFailsWithInvalidToken)
+}
+
 func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
 
@@ -100,9 +115,7 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 	}
 
 	rec := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", input)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	storedUser, err := deps.queries.GetUserByEmail(context.Background(), input["email"])
 	if err != nil {
@@ -117,14 +130,7 @@ func testSignUpSucceedsAndPersistsUser(t *testing.T) {
 		t.Fatalf("got stored email %q, want %q", storedUser.Email, input["email"])
 	}
 
-	ok, err := argon2.VerifyEncoded([]byte(input["password"]), []byte(storedUser.PasswordHash))
-	if err != nil {
-		t.Fatalf("VerifyEncoded returned error: %v", err)
-	}
-
-	if !ok {
-		t.Fatal("stored password hash does not match input password")
-	}
+	assertPasswordMatchesHash(t, input["password"], storedUser.PasswordHash)
 
 	count, err := deps.queries.GetSessionCountByUser(context.Background(), storedUser.ID)
 	if err != nil {
@@ -147,14 +153,10 @@ func testSignUpDuplicateEmail(t *testing.T) {
 	}
 
 	first := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", input)
-	if first.Code != http.StatusNoContent {
-		t.Fatalf("first sign up got status %d, want %d", first.Code, http.StatusNoContent)
-	}
+	assertStatus(t, first, http.StatusNoContent)
 
 	second := performJsonRequest(deps.handler, http.MethodPost, "/user/signup", input)
-	if second.Code != http.StatusBadRequest {
-		t.Fatalf("second sign up got status %d, want %d", second.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, second, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, second)
 	if gotErr.Email != "email already in use" {
@@ -175,9 +177,7 @@ func testSignUpRejectsBlankEmail(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Email != "email may not be blank" {
@@ -199,9 +199,7 @@ func testSignUpRejectsBlankPassword(t *testing.T) {
 		"password": "",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Password != "password can't be empty" {
@@ -219,9 +217,7 @@ func testSignUpRejectsCommonPassword(t *testing.T) {
 		"password": "123456789101112",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Password != "password too common" {
@@ -242,9 +238,7 @@ func testSignUpRejectsShortPassword(t *testing.T) {
 		"password": "12345678901",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Password != "password must be 13 or more characters" {
@@ -265,9 +259,7 @@ func testSignUpRejectsLongPassword(t *testing.T) {
 		"password": strings.Repeat("a", 257),
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Password != "password must be 256 charactrs or less" {
@@ -289,9 +281,7 @@ func testSignUpRejectsInvalidEmail(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Email != "email is not valid" {
@@ -322,9 +312,7 @@ func testSuccessfulLogin(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	// Session created for the user.
 	count, err := deps.queries.GetSessionCountByUser(ctx, user.DBUser().ID)
@@ -358,9 +346,7 @@ func testLogInRejectsInvalidEmail(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Email != "email is not valid" {
@@ -384,9 +370,7 @@ func testLogInReturnsUnauthorizedWhenUserDoesNotExist(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
+	assertStatus(t, rec, http.StatusUnauthorized)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "authentication failed" {
@@ -424,9 +408,7 @@ func testLogInReturnsUnauthorizedWhenPasswordIsIncorrect(t *testing.T) {
 		"password": "incorrect-password",
 	})
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
+	assertStatus(t, rec, http.StatusUnauthorized)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "authentication failed" {
@@ -485,9 +467,7 @@ func testLogInReturnsTooManyRequestsWhenRateLimited(t *testing.T) {
 		"password": "example-password",
 	})
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusTooManyRequests)
-	}
+	assertStatus(t, rec, http.StatusTooManyRequests)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "try again later" {
@@ -564,9 +544,7 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 		"password": password,
 	})
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	count, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
 	if err != nil {
@@ -597,34 +575,11 @@ func testLogInSucceedsWhenOneFailedAttemptIsOlderThanWindow(t *testing.T) {
 
 func testGetUserSucceedsWithAuthenticatedUser(t *testing.T) {
 	deps := setupUserIntegrationDeps(t)
-	ctx := context.Background()
 
-	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
-		Email:    "whoami@example.com",
-		Password: "example-password-12345",
-	})
-	if err != nil {
-		t.Fatalf("failed to create test user: %v", err)
-	}
+	createdUser, sessionCookie := signUpWithSessions(t, deps, "whoami@example.com", "example-password-12345", 1)
 
-	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
-	if err != nil {
-		t.Fatalf("failed to create test session: %v", err)
-	}
-
-	sessionCookie := http.Cookie{
-		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
-		Expires:  requestSession.Session.GetAbsoluteExpiration(),
-		HttpOnly: true,
-		Path:     "/",
-		Secure:   false,
-	}
-
-	rec := performJsonRequest(deps.handler, http.MethodGet, "/user", map[string]any{}, &sessionCookie)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
-	}
+	rec := performJsonRequest(deps.handler, http.MethodGet, "/user", map[string]any{}, sessionCookie)
+	assertStatus(t, rec, http.StatusOK)
 
 	var got getUserResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
@@ -648,39 +603,14 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 	currentPassword := "current-password-12345"
 	newPassword := "new-password-12345"
 
-	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
-		Email:    email,
-		Password: currentPassword,
-	})
-	if err != nil {
-		t.Fatalf("failed to create test user: %v", err)
-	}
-
-	var requestSession session.CreateSessionResult
-	for range 3 {
-		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
-		if err != nil {
-			t.Fatalf("failed to create active session: %v", err)
-		}
-	}
-
-	sessionCookie := http.Cookie{
-		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
-		Expires:  requestSession.Session.GetAbsoluteExpiration(),
-		HttpOnly: true,
-		Path:     "/",
-		Secure:   false,
-	}
+	createdUser, sessionCookie := signUpWithSessions(t, deps, email, currentPassword, 3)
 
 	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    currentPassword,
 		"newPassword": newPassword,
-	}, &sessionCookie)
+	}, sessionCookie)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	foundClearedCookie := false
 	for _, cookie := range rec.Result().Cookies() {
@@ -704,13 +634,7 @@ func testAuthenticatedPasswordResetSucceeds(t *testing.T) {
 		t.Fatalf("failed to fetch user after password reset: %v", err)
 	}
 
-	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(storedUser.PasswordHash))
-	if err != nil {
-		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
-	}
-	if !newPasswordMatches {
-		t.Fatal("stored password hash does not match new password")
-	}
+	assertPasswordMatchesHash(t, newPassword, storedUser.PasswordHash)
 
 	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
 	if err != nil {
@@ -730,36 +654,14 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 	incorrectPassword := "incorrect-password-12345"
 	newPassword := "new-password-12345"
 
-	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
-		Email:    email,
-		Password: currentPassword,
-	})
-	if err != nil {
-		t.Fatalf("failed to create test user: %v", err)
-	}
-
-	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
-	if err != nil {
-		t.Fatalf("failed to create active session: %v", err)
-	}
-
-	sessionCookie := http.Cookie{
-		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
-		Expires:  requestSession.Session.GetAbsoluteExpiration(),
-		HttpOnly: true,
-		Path:     "/",
-		Secure:   false,
-	}
+	createdUser, sessionCookie := signUpWithSessions(t, deps, email, currentPassword, 1)
 
 	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    incorrectPassword,
 		"newPassword": newPassword,
-	}, &sessionCookie)
+	}, sessionCookie)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
+	assertStatus(t, rec, http.StatusUnauthorized)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "authentication failed" {
@@ -797,36 +699,14 @@ func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
 	currentPassword := "current-password-12345"
 	commonNewPassword := "123456789101112"
 
-	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
-		Email:    email,
-		Password: currentPassword,
-	})
-	if err != nil {
-		t.Fatalf("failed to create test user: %v", err)
-	}
-
-	requestSession, err := deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
-	if err != nil {
-		t.Fatalf("failed to create active session: %v", err)
-	}
-
-	sessionCookie := http.Cookie{
-		Name:     "id",
-		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
-		Expires:  requestSession.Session.GetAbsoluteExpiration(),
-		HttpOnly: true,
-		Path:     "/",
-		Secure:   false,
-	}
+	createdUser, sessionCookie := signUpWithSessions(t, deps, email, currentPassword, 1)
 
 	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
 		"password":    currentPassword,
 		"newPassword": commonNewPassword,
-	}, &sessionCookie)
+	}, sessionCookie)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Password != "password too common" {
@@ -860,9 +740,7 @@ func testAuthenticatedPasswordResetFailsWithoutAuthenticatedUser(t *testing.T) {
 		"newPassword": "new-password-12345",
 	})
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
+	assertStatus(t, rec, http.StatusUnauthorized)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr != (apiErrorResponse{}) {
@@ -891,9 +769,7 @@ func testCanCreatePasswordResetRequest(t *testing.T) {
 		"email": email,
 	})
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	resetRequestCount := countPasswordResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
 	if resetRequestCount != 1 {
@@ -932,9 +808,7 @@ func testCreatingPasswordResetRequestForUnknownUserReturns204(t *testing.T) {
 		"email": email,
 	})
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	resetRequestCount := countPasswordResetRequests(t, deps.pool)
 	if resetRequestCount != 0 {
@@ -997,9 +871,7 @@ func testCreatingThreePasswordResetsIn15MinutesShowsRateLimitError(t *testing.T)
 		"email": email,
 	})
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusTooManyRequests)
-	}
+	assertStatus(t, rec, http.StatusTooManyRequests)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "try again later" {
@@ -1086,9 +958,7 @@ func testCreatingFourPasswordResetsInTwoHoursShowsRateLimitError(t *testing.T) {
 		"email": email,
 	})
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusTooManyRequests)
-	}
+	assertStatus(t, rec, http.StatusTooManyRequests)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "try again later" {
@@ -1148,22 +1018,14 @@ func testPasswordResetSucceedsWithValidResetTokenAndDeactivatesSessions(t *testi
 	rec := performJsonRequest(deps.handler, http.MethodPut, "/password-reset?token="+resetToken, map[string]string{
 		"newPassword": newPassword,
 	})
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNoContent)
-	}
+	assertStatus(t, rec, http.StatusNoContent)
 
 	userAfterPassReset, err := deps.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		t.Fatalf("failed to fetch user after token reset: %v", err)
 	}
 
-	newPasswordMatches, err := argon2.VerifyEncoded([]byte(newPassword), []byte(userAfterPassReset.PasswordHash))
-	if err != nil {
-		t.Fatalf("VerifyEncoded returned error for new password: %v", err)
-	}
-	if !newPasswordMatches {
-		t.Fatal("stored password hash does not match new password")
-	}
+	assertPasswordMatchesHash(t, newPassword, userAfterPassReset.PasswordHash)
 
 	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
 	if err != nil {
@@ -1214,9 +1076,7 @@ func testCantResetPasswordWithIncorrectToken(t *testing.T) {
 		"newPassword": newPassword,
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "invalid or expired reset token" {
@@ -1274,7 +1134,7 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
 	}
 
-	err = deps.userService.ResetPasswordFromResetRequest(ctx, resetToken, user.ResetPasswordFromResetRequestBody{
+	_, err = deps.userService.ResetPasswordFromResetRequest(ctx, resetToken, user.ResetPasswordFromResetRequestBody{
 		NewPassword: firstNewPassword,
 	})
 	if err != nil {
@@ -1290,9 +1150,7 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 		"newPassword": secondNewPassword,
 	})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	assertStatus(t, rec, http.StatusBadRequest)
 
 	gotErr := decodeErrorResponse(t, rec)
 	if gotErr.Error != "invalid or expired reset token" {
@@ -1309,6 +1167,269 @@ func testCantResetPasswordWithAlreadyUsedToken(t *testing.T) {
 	}
 }
 
+func testEmailResetRequestSucceeds(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	currentEmail := "email-reset-request-success@example.com"
+	newEmail := "email-reset-request-success-new@example.com"
+	currentPassword := "current-password-12345"
+
+	createdUser, sessionCookie := signUpWithSessions(t, deps, currentEmail, currentPassword, 2)
+
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+		"password": currentPassword,
+		"newEmail": newEmail,
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusNoContent)
+
+	if len(deps.emailService.Emails) != 2 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 2)
+	}
+
+	newEmailMessage := deps.emailService.Emails[0]
+	if newEmailMessage.ToEmail != newEmail {
+		t.Fatalf("got first email recipient %q, want %q", newEmailMessage.ToEmail, newEmail)
+	}
+	if newEmailMessage.Subject != "Email Reset" {
+		t.Fatalf("got first email subject %q, want %q", newEmailMessage.Subject, "Email Reset")
+	}
+	wantPrefix := "http://example.com/email-reset/?token="
+	if !strings.HasPrefix(newEmailMessage.Body, wantPrefix) {
+		t.Fatalf("got first email body %q, want prefix %q", newEmailMessage.Body, wantPrefix)
+	}
+
+	oldEmailMessage := deps.emailService.Emails[1]
+	if oldEmailMessage.ToEmail != currentEmail {
+		t.Fatalf("got second email recipient %q, want %q", oldEmailMessage.ToEmail, currentEmail)
+	}
+	if oldEmailMessage.Subject != "Email Change Requested" {
+		t.Fatalf("got second email subject %q, want %q", oldEmailMessage.Subject, "Email Change Requested")
+	}
+
+	resetRequestCount := countEmailResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 1 {
+		t.Fatalf("got %d email reset requests after request, want %d", resetRequestCount, 1)
+	}
+
+	resetToken := extractTokenFromResetBody(newEmailMessage.Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", newEmailMessage.Body)
+	}
+
+	// Email is not changed yet, only requested.
+	if _, err := deps.queries.GetUserByEmail(ctx, currentEmail); err != nil {
+		t.Fatalf("failed to fetch user by current email after request: %v", err)
+	}
+}
+
+func testEmailResetConfirmSucceeds(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	currentEmail := "email-reset-confirm-success@example.com"
+	newEmail := "email-reset-confirm-success-new@example.com"
+	currentPassword := "current-password-12345"
+
+	createdUser, _ := signUpWithSessions(t, deps, currentEmail, currentPassword, 2)
+
+	err := deps.userService.CreateEmailResetRequest(ctx, createdUser, user.CreateEmailResetRequestBody{
+		Password: currentPassword,
+		NewEmail: newEmail,
+	})
+	if err != nil {
+		t.Fatalf("CreateEmailResetRequest returned error: %v", err)
+	}
+
+	if len(deps.emailService.Emails) != 2 {
+		t.Fatalf("got %d sent emails, want %d", len(deps.emailService.Emails), 2)
+	}
+
+	resetToken := extractTokenFromResetBody(deps.emailService.Emails[0].Body)
+	if resetToken == "" {
+		t.Fatalf("failed to extract reset token from email body %q", deps.emailService.Emails[0].Body)
+	}
+
+	confirmRec := performJsonRequest(deps.handler, http.MethodPut, "/email-reset?token="+resetToken, nil)
+	assertStatus(t, confirmRec, http.StatusNoContent)
+
+	if _, err := deps.queries.GetUserByEmail(ctx, newEmail); err != nil {
+		t.Fatalf("failed to fetch user by new email after confirm: %v", err)
+	}
+
+	assertNoUserWithEmail(t, deps.queries, currentEmail)
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after confirm: %v", err)
+	}
+	if activeCountAfter != 0 {
+		t.Fatalf("got %d active sessions after confirm, want 0", activeCountAfter)
+	}
+
+	rawToken, err := base64.RawURLEncoding.DecodeString(resetToken)
+	if err != nil {
+		t.Fatalf("failed to decode reset token for post-confirm verification: %v", err)
+	}
+	tokenHash := sha256.Sum256(rawToken)
+	_, err = deps.queries.ConsumeEmailResetRequest(ctx, tokenHash[:])
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("expected consumed email reset token to be deleted, got err: %v", err)
+	}
+}
+
+func testEmailResetRequestFailsWithWrongPassword(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	currentEmail := "email-reset-wrong-password@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+	newEmail := "email-reset-wrong-password-new@example.com"
+
+	createdUser, sessionCookie := signUpWithSessions(t, deps, currentEmail, currentPassword, 1)
+
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+		"password": incorrectPassword,
+		"newEmail": newEmail,
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusUnauthorized)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "authentication failed" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "authentication failed")
+	}
+
+	assertNoSessionCookie(t, rec)
+
+	if len(deps.emailService.Emails) != 0 {
+		t.Fatalf("got %d sent emails, want 0", len(deps.emailService.Emails))
+	}
+
+	resetRequestCount := countEmailResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 0 {
+		t.Fatalf("got %d email reset requests, want 0", resetRequestCount)
+	}
+
+	failedAttempts := countAuthAttemptsByEmailAndOutcome(t, deps.pool, currentEmail, db.AuthOutcomeFailed)
+	if failedAttempts != 1 {
+		t.Fatalf("got %d failed email reset auth attempts, want 1", failedAttempts)
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after failed request: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after failed request, want 1", activeCountAfter)
+	}
+}
+
+func testEmailResetRequestFailsWhenNewEmailAlreadyInUse(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	requesterEmail := "email-reset-taken-requester@example.com"
+	requesterPassword := "current-password-12345"
+	takenEmail := "email-reset-taken@example.com"
+
+	createdUser, sessionCookie := signUpWithSessions(t, deps, requesterEmail, requesterPassword, 1)
+
+	_, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    takenEmail,
+		Password: "other-password-12345",
+	})
+	if err != nil {
+		t.Fatalf("failed to create existing test user: %v", err)
+	}
+
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+		"password": requesterPassword,
+		"newEmail": takenEmail,
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Email != "email already in use" {
+		t.Fatalf("got email error %q, want %q", gotErr.Email, "email already in use")
+	}
+
+	if len(deps.emailService.Emails) != 0 {
+		t.Fatalf("got %d sent emails, want 0", len(deps.emailService.Emails))
+	}
+
+	resetRequestCount := countEmailResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 0 {
+		t.Fatalf("got %d email reset requests, want 0", resetRequestCount)
+	}
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, requesterEmail)
+	if err != nil {
+		t.Fatalf("failed to fetch requesting user after failed request: %v", err)
+	}
+	if storedUser.Email != requesterEmail {
+		t.Fatalf("got requester email %q, want unchanged %q", storedUser.Email, requesterEmail)
+	}
+}
+
+func testEmailResetRequestFailsWithoutAuthenticatedUser(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+		"password": "current-password-12345",
+		"newEmail": "email-reset-unauthenticated-new@example.com",
+	})
+
+	assertStatus(t, rec, http.StatusUnauthorized)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr != (apiErrorResponse{}) {
+		t.Fatalf("got error response %+v, want empty response", gotErr)
+	}
+
+	assertNoSessionCookie(t, rec)
+
+	if len(deps.emailService.Emails) != 0 {
+		t.Fatalf("got %d sent emails, want 0", len(deps.emailService.Emails))
+	}
+}
+
+func testEmailResetConfirmFailsWithInvalidToken(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	currentEmail := "email-reset-invalid-token@example.com"
+	currentPassword := "current-password-12345"
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    currentEmail,
+		Password: currentPassword,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/email-reset?token=incorrect-reset-token", nil)
+
+	assertStatus(t, rec, http.StatusBadRequest)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "invalid or expired reset token" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "invalid or expired reset token")
+	}
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, currentEmail)
+	if err != nil {
+		t.Fatalf("failed to fetch user after failed confirm: %v", err)
+	}
+	if storedUser.ID != createdUser.DBUser().ID {
+		t.Fatalf("got user id %v, want %v", storedUser.ID, createdUser.DBUser().ID)
+	}
+}
+
 func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	t.Helper()
 
@@ -1322,7 +1443,10 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	sliceEmailService := &email.SliceEmailService{}
 	txnGenerator := user.CreateUserServiceTxnGenerator(pool, queries)
 	sessionService := session.NewService(queries)
-	userService := user.NewService(queries, txnGenerator, sliceEmailService, sessionService, user.Config{PasswordResetURL: "http://example.com/password-reset"})
+	userService := user.NewService(queries, txnGenerator, sliceEmailService, user.Config{
+		PasswordResetURL: "http://example.com/password-reset",
+		EmailResetURL:    "http://example.com/email-reset",
+	})
 
 	handler := server.NewMux(userService, sessionService)
 
@@ -1336,17 +1460,6 @@ func setupUserIntegrationDeps(t *testing.T) userIntegrationDeps {
 	}
 }
 
-type apiErrorResponse struct {
-	Error    string `json:"error"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type getUserResponse struct {
-	ID    int64  `json:"id"`
-	Email string `json:"email"`
-}
-
 func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) apiErrorResponse {
 	t.Helper()
 
@@ -1356,6 +1469,61 @@ func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) apiErrorR
 	}
 
 	return got
+}
+
+func assertStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
+	t.Helper()
+
+	if rec.Code != want {
+		t.Fatalf("got status %d, want %d", rec.Code, want)
+	}
+}
+
+func assertPasswordMatchesHash(t *testing.T, password string, hash string) {
+	t.Helper()
+
+	matches, err := argon2.VerifyEncoded([]byte(password), []byte(hash))
+	if err != nil {
+		t.Fatalf("VerifyEncoded returned error: %v", err)
+	}
+	if !matches {
+		t.Fatal("password does not match stored hash")
+	}
+}
+
+// signUpWithSessions signs up a user, creates sessionCount active sessions for
+// them, and returns the created user along with a session cookie for the most
+// recently created session.
+func signUpWithSessions(t *testing.T, deps userIntegrationDeps, emailAddr string, password string, sessionCount int) (user.User, *http.Cookie) {
+	t.Helper()
+	ctx := context.Background()
+
+	createdUser, err := deps.userService.SignUp(ctx, user.AuthenticateBody{
+		Email:    emailAddr,
+		Password: password,
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+
+	var requestSession session.CreateSessionResult
+	for range sessionCount {
+		requestSession, err = deps.sessionService.CreateSession(ctx, createdUser.DBUser().ID)
+		if err != nil {
+			t.Fatalf("failed to create active session: %v", err)
+		}
+	}
+
+	sessionCookie := &http.Cookie{
+		Name:     "id",
+		Value:    base64.StdEncoding.EncodeToString(requestSession.RawID),
+		Expires:  requestSession.Session.GetAbsoluteExpiration(),
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   false,
+	}
+
+	return createdUser, sessionCookie
 }
 
 func assertSessionCookieExists(t *testing.T, rec *httptest.ResponseRecorder) {
@@ -1456,6 +1624,18 @@ func countPasswordResetRequestsByUserID(t *testing.T, pool *pgxpool.Pool, userID
 	return count
 }
 
+func countEmailResetRequestsByUserID(t *testing.T, pool *pgxpool.Pool, userID int64) int {
+	t.Helper()
+
+	var count int
+	err := pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM email_reset_requests WHERE user_id = $1", userID).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count email reset requests for user %v: %v", userID, err)
+	}
+
+	return count
+}
+
 func countPasswordResetRequests(t *testing.T, pool *pgxpool.Pool) int {
 	t.Helper()
 
@@ -1506,4 +1686,15 @@ func extractTokenFromResetBody(body string) string {
 	}
 
 	return token
+}
+
+type apiErrorResponse struct {
+	Error    string `json:"error"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type getUserResponse struct {
+	ID    int64  `json:"id"`
+	Email string `json:"email"`
 }

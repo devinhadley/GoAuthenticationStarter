@@ -48,10 +48,14 @@ func main() {
 	}
 
 	passwordResetURL := getEnvOrPanic("PASSWORD_RESET_URL")
+	emailResetURL := getEnvOrPanic("EMAIL_RESET_URL")
 	txnGenerator := user.CreateUserServiceTxnGenerator(dbConPool, queries)
 
 	sessionService := session.NewService(queries)
-	userService := user.NewService(queries, txnGenerator, mailService, sessionService, user.Config{PasswordResetURL: passwordResetURL})
+	userService := user.NewService(queries, txnGenerator, mailService, user.Config{
+		PasswordResetURL: passwordResetURL,
+		EmailResetURL:    emailResetURL,
+	})
 
 	http.ListenAndServe(":8080", server.NewMux(userService, sessionService))
 }

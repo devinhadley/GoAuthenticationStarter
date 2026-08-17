@@ -8,9 +8,9 @@ import (
 	"fmt"
 
 	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/pgerr"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type SessionQueries interface {
@@ -72,8 +72,7 @@ func (s *Service) CreateSession(ctx context.Context, userID int64) (CreateSessio
 		UserID: userID,
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "sessions_user_id_fkey" {
+		if pgerr.IsForeignKeyViolation(err) {
 			return CreateSessionResult{}, ErrUserNotFound
 		}
 

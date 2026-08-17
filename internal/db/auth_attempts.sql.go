@@ -11,34 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countAuthAttemptsForPassResetReq = `-- name: CountAuthAttemptsForPassResetReq :one
-SELECT 
-  COUNT(*) AS old_count,
-  COUNT(*) FILTER (WHERE created_at >= ($1)) AS recent_count
-FROM auth_attempts
-WHERE action = 'password_reset'
-  AND email = $2
-  AND created_at >= $3
-`
-
-type CountAuthAttemptsForPassResetReqParams struct {
-	RecentDate pgtype.Timestamptz
-	Email      string
-	OldDate    pgtype.Timestamptz
-}
-
-type CountAuthAttemptsForPassResetReqRow struct {
-	OldCount    int64
-	RecentCount int64
-}
-
-func (q *Queries) CountAuthAttemptsForPassResetReq(ctx context.Context, arg CountAuthAttemptsForPassResetReqParams) (CountAuthAttemptsForPassResetReqRow, error) {
-	row := q.db.QueryRow(ctx, countAuthAttemptsForPassResetReq, arg.RecentDate, arg.Email, arg.OldDate)
-	var i CountAuthAttemptsForPassResetReqRow
-	err := row.Scan(&i.OldCount, &i.RecentCount)
-	return i, err
-}
-
 const countFailedAuthAttemptsSince = `-- name: CountFailedAuthAttemptsSince :one
 SELECT COUNT(*)
 FROM auth_attempts
@@ -59,6 +31,40 @@ func (q *Queries) CountFailedAuthAttemptsSince(ctx context.Context, arg CountFai
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countTieredAuthAttempts = `-- name: CountTieredAuthAttempts :one
+SELECT
+  COUNT(*) AS old_count,
+  COUNT(*) FILTER (WHERE created_at >= ($1)) AS recent_count
+FROM auth_attempts
+WHERE action = $2
+  AND email = $3
+  AND created_at >= $4
+`
+
+type CountTieredAuthAttemptsParams struct {
+	RecentDate pgtype.Timestamptz
+	Action     AuthAction
+	Email      string
+	OldDate    pgtype.Timestamptz
+}
+
+type CountTieredAuthAttemptsRow struct {
+	OldCount    int64
+	RecentCount int64
+}
+
+func (q *Queries) CountTieredAuthAttempts(ctx context.Context, arg CountTieredAuthAttemptsParams) (CountTieredAuthAttemptsRow, error) {
+	row := q.db.QueryRow(ctx, countTieredAuthAttempts,
+		arg.RecentDate,
+		arg.Action,
+		arg.Email,
+		arg.OldDate,
+	)
+	var i CountTieredAuthAttemptsRow
+	err := row.Scan(&i.OldCount, &i.RecentCount)
+	return i, err
 }
 
 const createLoginAuthAttempt = `-- name: CreateLoginAuthAttempt :exec

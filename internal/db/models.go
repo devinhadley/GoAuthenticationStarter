@@ -104,6 +104,13 @@ type AuthAttempt struct {
 	Outcome   AuthOutcome
 }
 
+type EmailResetRequest struct {
+	ID        []byte
+	UserID    int64
+	NewEmail  string
+	CreatedAt pgtype.Timestamptz
+}
+
 type PasswordResetRequest struct {
 	ID        []byte
 	UserID    int64

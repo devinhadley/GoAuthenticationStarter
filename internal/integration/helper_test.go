@@ -17,17 +17,6 @@ var (
 	integrationTestPool *pgxpool.Pool
 )
 
-func getIntegrationTestDSN(t testing.TB) string {
-	t.Helper()
-
-	if integrationTestDSN != "" {
-		return integrationTestDSN
-	}
-
-	t.Fatal("integration test dsn is empty; expected TestMain to initialize container connection string")
-	return ""
-}
-
 func getIntegrationTestPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 
@@ -43,7 +32,7 @@ func getIntegrationTestPool(t testing.TB) *pgxpool.Pool {
 func cleanupIntegrationTables(t testing.TB, pool *pgxpool.Pool) {
 	t.Helper()
 
-	_, err := pool.Exec(context.Background(), "TRUNCATE TABLE sessions, users, auth_attempts, password_reset_requests RESTART IDENTITY")
+	_, err := pool.Exec(context.Background(), "TRUNCATE TABLE sessions, users, auth_attempts, password_reset_requests, email_reset_requests RESTART IDENTITY")
 	if err != nil {
 		t.Fatalf("failed to clean integration tables: %v", err)
 	}

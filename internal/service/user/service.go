@@ -5,6 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"devinhadley/gobootstrapweb/internal/db"
+	"devinhadley/gobootstrapweb/internal/pgerr"
+	"devinhadley/gobootstrapweb/internal/service/email"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -14,11 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"devinhadley/gobootstrapweb/internal/db"
-	"devinhadley/gobootstrapweb/internal/service/email"
-
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/matthewhartstonge/argon2"
 )
@@ -28,7 +27,6 @@ var (
 	ErrInvalidLogInInput  = errors.New("invalid log-in input")
 	ErrEmailTaken         = errors.New("email already in use")
 	ErrInvalidEmail       = errors.New("email is not valid")
-	ErrPasswordHashing    = errors.New("password hashing not implemented")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrPasswordEmpty      = errors.New("password cannot be empty")
 	ErrPasswordShort      = errors.New("password cannot be empty")
@@ -40,13 +38,21 @@ var (
 )
 
 const (
-	rateLimitLoginDurationMinutes              = 10
-	rateLimitLoginAttemptsAllowed              = 10
-	rateLimitPasswordResetShortDurationMinutes = 15
-	rateLimitPasswordResetLongDurationMinutes  = 120
-	rateLimitPasswordResetShortAllowed         = 2
-	rateLimitPasswordResetLongAllowed          = 3
-	passwordResetTokenDurationMinutes          = 15
+	rateLimitLoginDurationMinutes = 10
+	rateLimitLoginAttemptsAllowed = 10
+
+	passwordResetTokenDurationMinutes = 15
+	emailResetTokenDurationMinutes    = 15
+
+	passwordResetRateLimitShortWindowMinutes = 15
+	passwordResetRateLimitLongWindowMinutes  = 120
+	passwordResetRateLimitShortAllowed       = 2
+	passwordResetRateLimitLongAllowed        = 3
+
+	emailResetRateLimitShortWindowMinutes = 15
+	emailResetRateLimitLongWindowMinutes  = 120
+	emailResetRateLimitShortAllowed       = 2
+	emailResetRateLimitLongAllowed        = 3
 )
 
 type UserQueries interface {
@@ -54,15 +60,14 @@ type UserQueries interface {
 	GetUserByEmail(ctx context.Context, email string) (db.User, error)
 	GetUserByID(ctx context.Context, id int64) (db.User, error)
 	CountFailedAuthAttemptsSince(ctx context.Context, arg db.CountFailedAuthAttemptsSinceParams) (int64, error)
-	CountAuthAttemptsForPassResetReq(ctx context.Context, arg db.CountAuthAttemptsForPassResetReqParams) (db.CountAuthAttemptsForPassResetReqRow, error)
+	CountTieredAuthAttempts(ctx context.Context, arg db.CountTieredAuthAttemptsParams) (db.CountTieredAuthAttemptsRow, error)
 	CreateLoginAuthAttempt(ctx context.Context, arg db.CreateLoginAuthAttemptParams) error
 	CreatePasswordResetRequest(ctx context.Context, arg db.CreatePasswordResetRequestParams) (db.PasswordResetRequest, error)
 	ConsumePasswordResetRequest(ctx context.Context, id []byte) (db.PasswordResetRequest, error)
 	UpdatePasswordHash(ctx context.Context, arg db.UpdatePasswordHashParams) error
-}
-
-type sessionDeactivator interface {
-	DeactivateAllSessionsForUser(ctx context.Context, userID int64) error
+	CreateEmailResetRequest(ctx context.Context, arg db.CreateEmailResetRequestParams) (db.EmailResetRequest, error)
+	ConsumeEmailResetRequest(ctx context.Context, id []byte) (db.EmailResetRequest, error)
+	UpdateEmail(ctx context.Context, arg db.UpdateEmailParams) error
 }
 
 type Service struct {
@@ -71,7 +76,6 @@ type Service struct {
 	commonPasswords commonPasswords
 	config          Config
 	emailService    email.Service
-	sessionService  sessionDeactivator
 }
 
 type AuthenticateBody struct {
@@ -92,16 +96,25 @@ type ResetPasswordFromResetRequestBody struct {
 	NewPassword string `json:"newPassword"`
 }
 
-type Config struct {
-	PasswordResetURL string
+type CreateEmailResetRequestBody struct {
+	Password string `json:"password"`
+	NewEmail string `json:"newEmail"`
 }
 
-func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, sessionService sessionDeactivator, config Config) *Service {
+type Config struct {
+	PasswordResetURL string
+	EmailResetURL    string
+}
+
+func NewService(queries UserQueries, runWithTx RunUserQueriesInTxFn, emailService email.Service, config Config) *Service {
 	if len(config.PasswordResetURL) > 0 && !strings.HasSuffix(config.PasswordResetURL, "/") {
 		config.PasswordResetURL += "/"
 	}
+	if len(config.EmailResetURL) > 0 && !strings.HasSuffix(config.EmailResetURL, "/") {
+		config.EmailResetURL += "/"
+	}
 
-	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, sessionService: sessionService, commonPasswords: getCommonPasswords(), config: config}
+	return &Service{queries: queries, runWithTx: runWithTx, emailService: emailService, commonPasswords: getCommonPasswords(), config: config}
 }
 
 func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, error) {
@@ -130,11 +143,8 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, err
 		PasswordHash: string(passwordHash),
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			if pgErr.ConstraintName == "users_email_key" {
-				return User{}, ErrEmailTaken
-			}
+		if pgerr.IsUniqueViolation(err) {
+			return User{}, ErrEmailTaken
 		}
 
 		return User{}, fmt.Errorf("creating user: %w", err)
@@ -170,33 +180,21 @@ func (s *Service) LogIn(ctx context.Context, input AuthenticateBody) (User, erro
 	user, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
-			if err != nil {
-				return User{}, err
-			}
-			return User{}, ErrInvalidCredentials
+			return s.failLoginAttempt(ctx, email)
 		}
 		return User{}, fmt.Errorf("getting user by email: %w", err)
 	}
 
 	if !user.IsActive {
-		err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
-		if err != nil {
-			return User{}, err
-		}
-		return User{}, ErrInvalidCredentials
+		return s.failLoginAttempt(ctx, email)
 	}
 
-	ok, err = argon2.VerifyEncoded([]byte(input.Password), []byte(user.PasswordHash))
+	ok, err = verifyPassword(input.Password, user.PasswordHash)
 	if err != nil {
-		return User{}, fmt.Errorf("validating password hash: %w", err)
+		return User{}, err
 	}
 	if !ok {
-		err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed)
-		if err != nil {
-			return User{}, err
-		}
-		return User{}, ErrInvalidCredentials
+		return s.failLoginAttempt(ctx, email)
 	}
 
 	err = s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeSucceeded)
@@ -213,9 +211,10 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 		return err
 	}
 
-	ok, err := argon2.VerifyEncoded([]byte(input.Password), []byte(usr.DBUser().PasswordHash))
+	// TODO: No rate-limiting here. An authenticated session could be used to brute-force.
+	ok, err := verifyPassword(input.Password, usr.DBUser().PasswordHash)
 	if err != nil {
-		return fmt.Errorf("validating password hash: %w", err)
+		return err
 	}
 
 	if !ok {
@@ -235,15 +234,6 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 		return fmt.Errorf("updating password hash during authenticated password reset: %w", err)
 	}
 
-	// NOTE:
-	// If for any reason we fail to deactivate sessions, we should still let the password reset go through.
-	// This is still bad though and deactivation should be retried at some point.
-	err = s.sessionService.DeactivateAllSessionsForUser(ctx, usr.DBUser().ID)
-	if err != nil {
-		log.Printf("deactivating all sessions during authenticated password reset: %v", err)
-		return nil
-	}
-
 	return nil
 }
 
@@ -253,7 +243,7 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 		return ErrInvalidEmail
 	}
 
-	isRateLimited, err := s.isPasswordResetReqRateLimited(ctx, email)
+	isRateLimited, err := s.isCreatePasswordResetRateLimited(ctx, email)
 	if err != nil {
 		return fmt.Errorf("checking if password reset request rate limited: %w", err)
 	}
@@ -305,15 +295,15 @@ func (s *Service) CreatePasswordResetRequest(ctx context.Context, reqBody Create
 	return nil
 }
 
-func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token string, input ResetPasswordFromResetRequestBody) error {
+func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token string, input ResetPasswordFromResetRequestBody) (int64, error) {
 	err := s.isValidPassword(input.NewPassword)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	resetToken, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
-		return ErrInvalidResetToken
+		return 0, ErrInvalidResetToken
 	}
 
 	sum := sha256.Sum256(resetToken)
@@ -354,15 +344,138 @@ func (s *Service) ResetPasswordFromResetRequest(ctx context.Context, token strin
 		return nil
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	err = s.sessionService.DeactivateAllSessionsForUser(ctx, userID)
+	return userID, nil
+}
+
+func (s *Service) CreateEmailResetRequest(ctx context.Context, usr User, input CreateEmailResetRequestBody) error {
+	newEmail, ok := normalizeAndValidateEmail(input.NewEmail)
+	if !ok {
+		return ErrInvalidEmail
+	}
+
+	currentEmail := usr.DBUser().Email
+
+	isRateLimited, err := s.isCreateEmailResetRateLimited(ctx, currentEmail)
 	if err != nil {
-		log.Printf("deactivating all sessions during reset from token: %v", err)
+		return fmt.Errorf("checking if create email reset request rate limited: %w", err)
+	}
+
+	if isRateLimited {
+		return ErrRateLimit
+	}
+
+	// TODO: rate limit internal auth attempts.
+	ok, err = verifyPassword(input.Password, usr.DBUser().PasswordHash)
+	if err != nil {
+		return fmt.Errorf("validating password hash: %w", err)
+	}
+
+	if !ok {
+		err = s.createAuthAttempt(ctx, db.AuthActionEmailReset, currentEmail, db.AuthOutcomeFailed)
+		if err != nil {
+			log.Printf("creating auth attempt for email reset request: %v", err)
+		}
+		return ErrInvalidCredentials
+	}
+
+	if newEmail == currentEmail {
+		return ErrEmailTaken
+	}
+
+	_, err = s.queries.GetUserByEmail(ctx, newEmail)
+	if err == nil {
+		return ErrEmailTaken
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("checking if new email is already in use: %w", err)
+	}
+
+	resetToken := make([]byte, 16)
+	_, err = rand.Read(resetToken)
+	if err != nil {
+		return fmt.Errorf("generating random bytes for email reset token: %w", err)
+	}
+
+	sum := sha256.Sum256(resetToken)
+	_, err = s.queries.CreateEmailResetRequest(ctx, db.CreateEmailResetRequestParams{
+		ID:       sum[:],
+		UserID:   usr.DBUser().ID,
+		NewEmail: newEmail,
+	})
+	if err != nil {
+		return fmt.Errorf("creating email reset request: %w", err)
+	}
+
+	encodedToken := base64.RawURLEncoding.EncodeToString(resetToken)
+	urlWithToken := fmt.Sprintf("%v?token=%v", s.config.EmailResetURL, encodedToken)
+	err = s.emailService.SendMail(newEmail, "Email Reset", urlWithToken)
+	if err != nil {
+		return fmt.Errorf("failed to send email reset email: %w", err)
+	}
+
+	err = s.emailService.SendMail(currentEmail, "Email Change Requested", "A change to your account email was requested. If this wasn't you, please secure your account.")
+	if err != nil {
+		log.Printf("failed to send email reset notification to old address: %v", err)
+	}
+
+	err = s.createAuthAttempt(ctx, db.AuthActionEmailReset, currentEmail, db.AuthOutcomeSucceeded)
+	if err != nil {
+		log.Printf("creating auth attempt for email reset request: %v", err)
 	}
 
 	return nil
+}
+
+func (s *Service) ResetEmailFromResetRequest(ctx context.Context, token string) (int64, error) {
+	resetToken, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return 0, ErrInvalidResetToken
+	}
+
+	sum := sha256.Sum256(resetToken)
+
+	var userID int64
+	err = s.runWithTx(ctx, func(qWithTx UserQueries) error {
+		resetRequest, err := qWithTx.ConsumeEmailResetRequest(ctx, sum[:])
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrInvalidResetToken
+			}
+
+			return fmt.Errorf("consuming email reset request: %w", err)
+		}
+
+		expiresAt := resetRequest.CreatedAt.Time.Add(emailResetTokenDurationMinutes * time.Minute)
+		if time.Now().After(expiresAt) {
+			// TODO: Cleanup expired tokens...
+			// Txn aborts so wont be deleted.
+			return ErrInvalidResetToken
+		}
+
+		err = qWithTx.UpdateEmail(ctx, db.UpdateEmailParams{
+			ID:    resetRequest.UserID,
+			Email: resetRequest.NewEmail,
+		})
+		if err != nil {
+			if pgerr.IsUniqueViolation(err) {
+				return ErrEmailTaken
+			}
+
+			return fmt.Errorf("updating email during reset from token: %w", err)
+		}
+
+		userID = resetRequest.UserID
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return userID, nil
 }
 
 func (s *Service) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -426,16 +539,25 @@ func (s *Service) isLoginRateLimited(ctx context.Context, email string) (bool, e
 	return loginAttemptsForEmail >= rateLimitLoginAttemptsAllowed, nil
 }
 
-func (s *Service) isPasswordResetReqRateLimited(ctx context.Context, email string) (bool, error) {
+func (s *Service) isCreatePasswordResetRateLimited(ctx context.Context, email string) (bool, error) {
+	return s.isTieredRateLimited(ctx, db.AuthActionPasswordReset, email, passwordResetRateLimitShortWindowMinutes*time.Minute, passwordResetRateLimitLongWindowMinutes*time.Minute, passwordResetRateLimitShortAllowed, passwordResetRateLimitLongAllowed)
+}
+
+func (s *Service) isCreateEmailResetRateLimited(ctx context.Context, email string) (bool, error) {
+	return s.isTieredRateLimited(ctx, db.AuthActionEmailReset, email, emailResetRateLimitShortWindowMinutes*time.Minute, emailResetRateLimitLongWindowMinutes*time.Minute, emailResetRateLimitShortAllowed, emailResetRateLimitLongAllowed)
+}
+
+func (s *Service) isTieredRateLimited(ctx context.Context, action db.AuthAction, email string, shortWindow, longWindow time.Duration, shortAllowed, longAllowed int64) (bool, error) {
 	now := time.Now()
 
-	count, err := s.queries.CountAuthAttemptsForPassResetReq(ctx, db.CountAuthAttemptsForPassResetReqParams{
+	count, err := s.queries.CountTieredAuthAttempts(ctx, db.CountTieredAuthAttemptsParams{
+		Action: action,
 		RecentDate: pgtype.Timestamptz{
-			Time:  now.Add(-(rateLimitPasswordResetShortDurationMinutes * time.Minute)),
+			Time:  now.Add(-shortWindow),
 			Valid: true,
 		},
 		OldDate: pgtype.Timestamptz{
-			Time:  now.Add(-(rateLimitPasswordResetLongDurationMinutes * time.Minute)),
+			Time:  now.Add(-longWindow),
 			Valid: true,
 		},
 		Email: email,
@@ -444,7 +566,7 @@ func (s *Service) isPasswordResetReqRateLimited(ctx context.Context, email strin
 		return false, err
 	}
 
-	return count.RecentCount >= rateLimitPasswordResetShortAllowed || count.OldCount >= rateLimitPasswordResetLongAllowed, nil
+	return count.RecentCount >= shortAllowed || count.OldCount >= longAllowed, nil
 }
 
 func (s *Service) createAuthAttempt(ctx context.Context, action db.AuthAction, email string, outcome db.AuthOutcome) error {
@@ -458,6 +580,13 @@ func (s *Service) createAuthAttempt(ctx context.Context, action db.AuthAction, e
 	}
 
 	return nil
+}
+
+func (s *Service) failLoginAttempt(ctx context.Context, email string) (User, error) {
+	if err := s.createAuthAttempt(ctx, db.AuthActionLogin, email, db.AuthOutcomeFailed); err != nil {
+		return User{}, err
+	}
+	return User{}, ErrInvalidCredentials
 }
 
 func normalizeAndValidateEmail(input string) (string, bool) {
@@ -506,4 +635,13 @@ func createPasswordHash(password string) ([]byte, error) {
 	}
 
 	return passwordHash, nil
+}
+
+func verifyPassword(password string, encodedHash string) (bool, error) {
+	ok, err := argon2.VerifyEncoded([]byte(password), []byte(encodedHash))
+	if err != nil {
+		return false, fmt.Errorf("validating password hash: %w", err)
+	}
+
+	return ok, nil
 }
