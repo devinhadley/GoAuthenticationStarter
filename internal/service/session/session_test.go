@@ -115,8 +115,7 @@ func testCreateSessionReturnsUserNotFound(t *testing.T) {
 	sessionService := NewService(&mockQueries{
 		CreateSessionFn: func(ctx context.Context, arg db.CreateSessionParams) (db.Session, error) {
 			return db.Session{}, &pgconn.PgError{
-				Code:           "23503",
-				ConstraintName: "sessions_user_id_fkey",
+				Code: "23503",
 			}
 		},
 	})

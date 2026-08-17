@@ -13,17 +13,15 @@ const (
 	foreignKeyViolation = "23503"
 )
 
-func IsUniqueViolation(err error, constraintName string) bool {
-	return hasConstraintViolation(err, uniqueViolation, constraintName)
+func IsUniqueViolation(err error) bool {
+	return hasCode(err, uniqueViolation)
 }
 
-func IsForeignKeyViolation(err error, constraintName string) bool {
-	return hasConstraintViolation(err, foreignKeyViolation, constraintName)
+func IsForeignKeyViolation(err error) bool {
+	return hasCode(err, foreignKeyViolation)
 }
 
-func hasConstraintViolation(err error, code, constraintName string) bool {
+func hasCode(err error, code string) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) &&
-		pgErr.Code == code &&
-		pgErr.ConstraintName == constraintName
+	return errors.As(err, &pgErr) && pgErr.Code == code
 }

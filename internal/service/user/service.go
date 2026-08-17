@@ -143,7 +143,7 @@ func (s *Service) SignUp(ctx context.Context, input AuthenticateBody) (User, err
 		PasswordHash: string(passwordHash),
 	})
 	if err != nil {
-		if pgerr.IsUniqueViolation(err, "users_email_key") {
+		if pgerr.IsUniqueViolation(err) {
 			return User{}, ErrEmailTaken
 		}
 
@@ -460,7 +460,7 @@ func (s *Service) ResetEmailFromResetRequest(ctx context.Context, token string) 
 			Email: resetRequest.NewEmail,
 		})
 		if err != nil {
-			if pgerr.IsUniqueViolation(err, "users_email_key") {
+			if pgerr.IsUniqueViolation(err) {
 				return ErrEmailTaken
 			}
 

@@ -265,8 +265,7 @@ func testUserSignUpEmailTaken(t *testing.T) {
 	userService := setupUserService(t, mockQueries{
 		CreateUserFn: func(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
 			return db.User{}, &pgconn.PgError{
-				Code:           "23505",
-				ConstraintName: "users_email_key",
+				Code: "23505",
 			}
 		},
 	})

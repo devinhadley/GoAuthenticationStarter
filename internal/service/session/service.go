@@ -72,7 +72,7 @@ func (s *Service) CreateSession(ctx context.Context, userID int64) (CreateSessio
 		UserID: userID,
 	})
 	if err != nil {
-		if pgerr.IsForeignKeyViolation(err, "sessions_user_id_fkey") {
+		if pgerr.IsForeignKeyViolation(err) {
 			return CreateSessionResult{}, ErrUserNotFound
 		}
 
