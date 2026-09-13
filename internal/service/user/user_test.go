@@ -672,7 +672,6 @@ func testResetPasswordForAuthenticatedUser(t *testing.T) {
 
 	userService := setupUserService(t, mockQueries{
 		UpdatePasswordHashFn: func(_ context.Context, arg db.UpdatePasswordHashParams) error {
-
 			if arg.ID != usr.DBUser().ID {
 				t.Fatalf("UpdatePasswordHash got id %v, want %v", arg.ID, usr.DBUser().ID)
 			}
@@ -977,7 +976,6 @@ func testRequestingTokenPasswordResetForUnknownEmail(t *testing.T) {
 			return db.PasswordResetRequest{}, nil
 		},
 		CreateLoginAuthAttemptFn: func(_ context.Context, arg db.CreateLoginAuthAttemptParams) error {
-
 			if arg.Action != db.AuthActionPasswordReset {
 				t.Fatalf("got action %v, want %v", arg.Action, db.AuthActionPasswordReset)
 			}
@@ -1208,7 +1206,8 @@ func testCanRequestEmailReset(t *testing.T) {
 	resetRequested := false
 	newEmailMailed := false
 	oldEmailNotified := false
-	authAttemptCreated := false
+	reauthAttemptCreated := false
+	emailResetAttemptCreated := false
 
 	emailResetURL := "http://example.com/email-reset"
 	userService := setupUserServiceWithEmailReset(t, mockQueries{
@@ -1233,16 +1232,20 @@ func testCanRequestEmailReset(t *testing.T) {
 			return db.EmailResetRequest{ID: arg.ID, UserID: arg.UserID, NewEmail: arg.NewEmail}, nil
 		},
 		CreateLoginAuthAttemptFn: func(_ context.Context, arg db.CreateLoginAuthAttemptParams) error {
-			if arg.Action != db.AuthActionEmailReset {
-				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionEmailReset)
-			}
 			if arg.Email != currentEmail {
 				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, currentEmail)
 			}
 			if arg.Outcome != db.AuthOutcomeSucceeded {
 				t.Fatalf("CreateLoginAuthAttempt got outcome %q, want %q", arg.Outcome, db.AuthOutcomeSucceeded)
 			}
-			authAttemptCreated = true
+			switch arg.Action {
+			case db.AuthActionReauthentication:
+				reauthAttemptCreated = true
+			case db.AuthActionEmailReset:
+				emailResetAttemptCreated = true
+			default:
+				t.Fatalf("CreateLoginAuthAttempt got unexpected action %q", arg.Action)
+			}
 			return nil
 		},
 	}, email.MockEmailService{
@@ -1292,8 +1295,11 @@ func testCanRequestEmailReset(t *testing.T) {
 	if !oldEmailNotified {
 		t.Fatal("SendMail to old email was not called")
 	}
-	if !authAttemptCreated {
-		t.Fatal("CreateLoginAuthAttempt was not called")
+	if !reauthAttemptCreated {
+		t.Fatal("CreateLoginAuthAttempt was not called for reauthentication")
+	}
+	if !emailResetAttemptCreated {
+		t.Fatal("CreateLoginAuthAttempt was not called for email_reset")
 	}
 }
 
@@ -1425,8 +1431,8 @@ func testCreateEmailResetRequestFailsWithIncorrectPassword(t *testing.T) {
 			return db.EmailResetRequest{}, nil
 		},
 		CreateLoginAuthAttemptFn: func(_ context.Context, arg db.CreateLoginAuthAttemptParams) error {
-			if arg.Action != db.AuthActionEmailReset {
-				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionEmailReset)
+			if arg.Action != db.AuthActionReauthentication {
+				t.Fatalf("CreateLoginAuthAttempt got action %q, want %q", arg.Action, db.AuthActionReauthentication)
 			}
 			if arg.Email != currentEmail {
 				t.Fatalf("CreateLoginAuthAttempt got email %q, want %q", arg.Email, currentEmail)

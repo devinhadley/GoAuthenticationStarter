@@ -79,6 +79,9 @@ func TestPasswordResetIntegration(t *testing.T) {
 	t.Run("password reset fails with incorrect password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWrongPassword)
 	t.Run("password reset fails with weak password and doesnt deactivate sessions", testAuthenticatedPasswordResetFailsWithWeakPassword)
 	t.Run("password reset fails without authenticated user", testAuthenticatedPasswordResetFailsWithoutAuthenticatedUser)
+	t.Run("password reset rate limits repeated wrong passwords", testAuthenticatedPasswordResetRateLimitsRepeatedWrongPasswords)
+	t.Run("password reset reauthentication rate limit is shared with email reset", testReauthenticationRateLimitIsSharedAcrossEndpoints)
+	t.Run("password reset succeeds when failed attempts are older than the rate limit window", testAuthenticatedPasswordResetSucceedsWhenFailuresAreOlderThanWindow)
 
 	// token based password reset.
 	t.Run("can create password reset request", testCanCreatePasswordResetRequest)
@@ -96,11 +99,10 @@ func TestEmailResetIntegration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
-	// TODO: Test rate limit # of requests...
-
 	t.Run("email reset request succeeds and sends emails", testEmailResetRequestSucceeds)
 	t.Run("email reset confirm succeeds and deactivates sessions", testEmailResetConfirmSucceeds)
 	t.Run("email reset request fails with incorrect password and doesnt deactivate sessions", testEmailResetRequestFailsWithWrongPassword)
+	t.Run("email reset request rate limits repeated wrong passwords", testEmailResetRequestRateLimitsRepeatedWrongPasswords)
 	t.Run("email reset request fails when new email already in use", testEmailResetRequestFailsWhenNewEmailAlreadyInUse)
 	t.Run("email reset request fails without authenticated user", testEmailResetRequestFailsWithoutAuthenticatedUser)
 	t.Run("email reset confirm fails with invalid token", testEmailResetConfirmFailsWithInvalidToken)
@@ -689,6 +691,149 @@ func testAuthenticatedPasswordResetFailsWithWrongPassword(t *testing.T) {
 	if activeCountAfter != 1 {
 		t.Fatalf("got %d active sessions after reset, want 1", activeCountAfter)
 	}
+}
+
+func testAuthenticatedPasswordResetRateLimitsRepeatedWrongPasswords(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-rate-limited@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+	newPassword := "new-password-12345"
+
+	createdUser, sessionCookie := signUpWithSessions(t, deps, email, currentPassword, 1)
+
+	for i := range 10 {
+		rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
+			"password":    incorrectPassword,
+			"newPassword": newPassword,
+		}, sessionCookie)
+
+		assertStatus(t, rec, http.StatusUnauthorized)
+
+		gotErr := decodeErrorResponse(t, rec)
+		if gotErr.Error != "authentication failed" {
+			t.Fatalf("attempt %d: got error %q, want %q", i, gotErr.Error, "authentication failed")
+		}
+	}
+
+	// 11th request, with the correct password, should still be rate limited.
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
+		"password":    currentPassword,
+		"newPassword": newPassword,
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusTooManyRequests)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "try again later" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
+	}
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after rate limited password reset: %v", err)
+	}
+	if storedUser.PasswordHash != createdUser.DBUser().PasswordHash {
+		t.Fatal("stored password hash changed after rate limited password reset")
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after rate limited reset: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after rate limited reset, want 1", activeCountAfter)
+	}
+
+	failedAttempts := countAuthAttemptsByEmailAndOutcome(t, deps.pool, email, db.AuthOutcomeFailed)
+	if failedAttempts != 10 {
+		t.Fatalf("got %d failed reauthentication attempts, want 10", failedAttempts)
+	}
+}
+
+func testReauthenticationRateLimitIsSharedAcrossEndpoints(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+
+	email := "reauthentication-shared-limit@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+
+	_, sessionCookie := signUpWithSessions(t, deps, email, currentPassword, 1)
+
+	for i := range 10 {
+		rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
+			"password":    incorrectPassword,
+			"newPassword": "new-password-12345",
+		}, sessionCookie)
+
+		assertStatus(t, rec, http.StatusUnauthorized)
+
+		gotErr := decodeErrorResponse(t, rec)
+		if gotErr.Error != "authentication failed" {
+			t.Fatalf("attempt %d: got error %q, want %q", i, gotErr.Error, "authentication failed")
+		}
+	}
+
+	// budget was exhausted via /user/password; /email-reset with the correct
+	// password should still be rate limited since the two flows share it.
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+		"password": currentPassword,
+		"newEmail": "reauthentication-shared-limit-new@example.com",
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusTooManyRequests)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "try again later" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
+	}
+
+	if len(deps.emailService.Emails) != 0 {
+		t.Fatalf("got %d sent emails, want 0", len(deps.emailService.Emails))
+	}
+}
+
+func testAuthenticatedPasswordResetSucceedsWhenFailuresAreOlderThanWindow(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	email := "password-reset-old-failures@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+	newPassword := "new-password-12345"
+
+	_, sessionCookie := signUpWithSessions(t, deps, email, currentPassword, 1)
+
+	for i := range 10 {
+		rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
+			"password":    incorrectPassword,
+			"newPassword": newPassword,
+		}, sessionCookie)
+
+		assertStatus(t, rec, http.StatusUnauthorized)
+
+		gotErr := decodeErrorResponse(t, rec)
+		if gotErr.Error != "authentication failed" {
+			t.Fatalf("attempt %d: got error %q, want %q", i, gotErr.Error, "authentication failed")
+		}
+	}
+
+	updateAuthAttemptsCreatedAtForEmailAndActionAndOutcome(t, deps.pool, email, db.AuthActionReauthentication, db.AuthOutcomeFailed, time.Now().Add(-11*time.Minute))
+
+	rec := performJsonRequest(deps.handler, http.MethodPut, "/user/password", map[string]string{
+		"password":    currentPassword,
+		"newPassword": newPassword,
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusNoContent)
+
+	storedUser, err := deps.queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		t.Fatalf("failed to fetch user after successful password reset: %v", err)
+	}
+	assertPasswordMatchesHash(t, newPassword, storedUser.PasswordHash)
 }
 
 func testAuthenticatedPasswordResetFailsWithWeakPassword(t *testing.T) {
@@ -1324,6 +1469,67 @@ func testEmailResetRequestFailsWithWrongPassword(t *testing.T) {
 	}
 	if activeCountAfter != 1 {
 		t.Fatalf("got %d active sessions after failed request, want 1", activeCountAfter)
+	}
+}
+
+func testEmailResetRequestRateLimitsRepeatedWrongPasswords(t *testing.T) {
+	deps := setupUserIntegrationDeps(t)
+	ctx := context.Background()
+
+	currentEmail := "email-reset-rate-limited@example.com"
+	currentPassword := "current-password-12345"
+	incorrectPassword := "incorrect-password-12345"
+	newEmail := "email-reset-rate-limited-new@example.com"
+
+	createdUser, sessionCookie := signUpWithSessions(t, deps, currentEmail, currentPassword, 1)
+
+	for i := range 10 {
+		rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+			"password": incorrectPassword,
+			"newEmail": newEmail,
+		}, sessionCookie)
+
+		assertStatus(t, rec, http.StatusUnauthorized)
+
+		gotErr := decodeErrorResponse(t, rec)
+		if gotErr.Error != "authentication failed" {
+			t.Fatalf("attempt %d: got error %q, want %q", i, gotErr.Error, "authentication failed")
+		}
+	}
+
+	// 11th request, with the correct password, should still be rate limited.
+	rec := performJsonRequest(deps.handler, http.MethodPost, "/email-reset", map[string]string{
+		"password": currentPassword,
+		"newEmail": newEmail,
+	}, sessionCookie)
+
+	assertStatus(t, rec, http.StatusTooManyRequests)
+
+	gotErr := decodeErrorResponse(t, rec)
+	if gotErr.Error != "try again later" {
+		t.Fatalf("got error %q, want %q", gotErr.Error, "try again later")
+	}
+
+	if len(deps.emailService.Emails) != 0 {
+		t.Fatalf("got %d sent emails, want 0", len(deps.emailService.Emails))
+	}
+
+	resetRequestCount := countEmailResetRequestsByUserID(t, deps.pool, createdUser.DBUser().ID)
+	if resetRequestCount != 0 {
+		t.Fatalf("got %d email reset requests, want 0", resetRequestCount)
+	}
+
+	failedAttempts := countAuthAttemptsByEmailAndOutcome(t, deps.pool, currentEmail, db.AuthOutcomeFailed)
+	if failedAttempts != 10 {
+		t.Fatalf("got %d failed reauthentication attempts, want 10", failedAttempts)
+	}
+
+	activeCountAfter, err := deps.queries.GetSessionCountByUser(ctx, createdUser.DBUser().ID)
+	if err != nil {
+		t.Fatalf("failed to get active session count after rate limited request: %v", err)
+	}
+	if activeCountAfter != 1 {
+		t.Fatalf("got %d active sessions after rate limited request, want 1", activeCountAfter)
 	}
 }
 
