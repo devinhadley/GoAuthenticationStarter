@@ -230,6 +230,8 @@ func (s *Service) ResetPasswordForAuthenticatedUser(ctx context.Context, usr Use
 		return fmt.Errorf("updating password hash during authenticated password reset: %w", err)
 	}
 
+	// TODO: Inform the user their password was reset.
+
 	return nil
 }
 
